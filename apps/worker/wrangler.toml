@@ -1,0 +1,13 @@
+name = "cloverbingo"
+main = "src/index.ts"
+compatibility_date = "2025-12-14"
+
+[durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionDurableObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = [ "SessionDurableObject" ]
+
