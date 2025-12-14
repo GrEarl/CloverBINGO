@@ -1,0 +1,16 @@
+{
+  "name": "cloverbingo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n worker,web -c blue,green \"npm -w apps/worker run dev\" \"npm -w apps/web run dev\"",
+    "test": "npm -w packages/core run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
+
