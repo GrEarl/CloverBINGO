@@ -190,7 +190,8 @@ export default function ModPage() {
           </div>
         )}
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr] lg:items-start">
+        {view && (
+          <div className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr] lg:items-start">
           <div className="grid gap-4 lg:sticky lg:top-6">
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -276,25 +277,20 @@ export default function ModPage() {
           </div>
 
           <Card>
-            <h2 className="text-base font-semibold">参加者一覧</h2>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Input placeholder="検索（名前/ID）" value={query} onChange={(e) => setQuery(e.target.value)} />
-              {selectedPlayer && (
-                <div className="text-xs text-neutral-400">
-                  選択中: <span className="font-mono text-neutral-200">{selectedPlayer.id}</span>
-                </div>
-              )}
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold">カード監視</h2>
+                <div className="mt-1 text-xs text-neutral-500">各カードの★でスポットライト下書きに追加/削除できます。</div>
+              </div>
+              <div className="w-full sm:w-[280px]">
+                <Input placeholder="検索（名前/ID）" value={query} onChange={(e) => setQuery(e.target.value)} />
+              </div>
             </div>
 
-            <div className="mt-4 overflow-hidden rounded-lg border border-neutral-800">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-3 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-400">
-                <div>★</div>
-                <div>name</div>
-                <div className="text-right">min</div>
-                <div className="text-right">reach</div>
-                <div className="text-right">bingo</div>
-              </div>
-              <div className="max-h-[70vh] overflow-auto">
+            {filteredPlayers.length === 0 ? (
+              <div className="mt-4 text-sm text-neutral-400">該当する参加者がいません。</div>
+            ) : (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {filteredPlayers.map((p) => {
                   const selected = draft.includes(p.id);
                   const isBingo = p.progress.isBingo;
@@ -303,41 +299,50 @@ export default function ModPage() {
                     <div
                       key={p.id}
                       className={[
-                        "grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-x-3 px-3 py-2 text-left text-sm",
-                        "border-t border-neutral-800/70",
-                        selected ? "bg-emerald-500/10" : "bg-transparent",
+                        "rounded-xl border p-3",
+                        selected ? "border-emerald-500/30 bg-emerald-500/10" : "border-neutral-800 bg-neutral-950/30",
                         isFocused ? "outline outline-2 outline-emerald-500/30" : "",
                       ].join(" ")}
                       title={p.id}
                     >
-                      <Button
-                        className="h-7 w-7 justify-center px-0 py-0"
-                        onClick={() => toggle(p.id)}
-                        size="sm"
-                        variant={selected ? "primary" : "secondary"}
-                        title={selected ? "下書きから外す" : "下書きに追加"}
-                        type="button"
-                      >
-                        ★
-                      </Button>
-                      <button
-                        className="truncate text-left"
-                        onClick={() => setSelectedId(p.id)}
-                        type="button"
-                      >
-                        <span className={isBingo ? "font-semibold text-emerald-200" : "text-neutral-200"}>{p.displayName}</span>
-                      </button>
-                      <div className="text-right font-mono text-xs text-neutral-300">{p.progress.minMissingToLine}</div>
-                      <div className="text-right font-mono text-xs text-neutral-300">{p.progress.reachLines}</div>
-                      <div className="text-right font-mono text-xs text-neutral-300">{p.progress.bingoLines}</div>
+                      <div className="flex items-start justify-between gap-2">
+                        <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedId(p.id)} type="button">
+                          <div className="flex items-center gap-2">
+                            <span className={["truncate text-sm", isBingo ? "font-semibold text-emerald-200" : "text-neutral-200"].join(" ")}>
+                              {p.displayName}
+                            </span>
+                            {isBingo ? <Badge variant="success">BINGO</Badge> : null}
+                          </div>
+                          <div className="mt-1 text-xs text-neutral-500">
+                            min <span className="font-mono text-neutral-200">{p.progress.minMissingToLine}</span> / reach{" "}
+                            <span className="font-mono text-neutral-200">{p.progress.reachLines}</span>
+                          </div>
+                        </button>
+                        <Button
+                          className="h-7 w-7 justify-center px-0 py-0"
+                          onClick={() => toggle(p.id)}
+                          size="sm"
+                          variant={selected ? "primary" : "secondary"}
+                          title={selected ? "下書きから外す" : "下書きに追加"}
+                          type="button"
+                        >
+                          ★
+                        </Button>
+                      </div>
+
+                      <div className="mt-2">
+                        <BingoCard card={p.card} drawnNumbers={view?.drawnNumbers ?? []} showHeaders={false} variant="compact" />
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
-            <div className="mt-2 text-xs text-neutral-500">並び順: minMissingToLine asc → reachLines desc → displayName</div>
+            )}
+
+            <div className="mt-3 text-xs text-neutral-500">並び順: minMissingToLine asc → reachLines desc → displayName</div>
           </Card>
         </div>
+        )}
       </div>
     </main>
   );
