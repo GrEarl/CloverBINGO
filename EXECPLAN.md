@@ -35,11 +35,15 @@
 - [x] (2025-12-15 03:50Z) Admin 画面に「音を有効化」導線と SE 再生、状態表示（次に押すべきキー）と end ボタンを実装した。
 - [x] (2025-12-15 03:50Z) Mod 画面に検索/ソート、参加者詳細（簡易カード）、最終更新者/時刻（相対）表示を実装した。
 - [x] (2025-12-15 03:50Z) 単体テスト（commitログ復元）を追加し、WS負荷確認（擬似接続）スクリプトを追加した。
+- [x] (2025-12-15 04:49Z) 仕様ズレ/運用リスク修正（`newBingoIds` の配信範囲、snapshot計算の最適化、WS再接続ジッター、`/api/dev/create-session` のローカル限定）。
 
 ## Surprises & Discoveries
 
 - npm workspaces では `workspace:*` プロトコルが使えなかったため、内部依存はバージョン一致（例：`0.0.0`）で解決する形にした。
 - `apps/worker` の `tsconfig` を strict のまま `tsc` に通すと、依存（hono）の型定義でエラーになることがあったため、`skipLibCheck` を有効化した（型チェック対象を自分のコードに寄せる）。
+- `draw.committed` の `newBingoIds` が全roleに配信され得る実装になっていたため、Mod/Admin のみに限定した。
+- WebSocket 再接続が固定間隔だと瞬断/デプロイ後に同時再接続が起きやすいため、指数バックオフ + ジッターに変更した。
+- `vite build` は TypeScript の型エラーを検出しないため、`npx tsc -p apps/web/tsconfig.json --noEmit` を回して HomePage の型エラーを修正した。
 
 ## Decision Log
 
@@ -60,6 +64,15 @@
   Date/Author: 2025-12-15 / codex
 - Decision: 永続化は D1 を正とし、抽選は commitログ（draw_commits）中心で復元できるモデルにする（DOのストレージはキャッシュ/最小限）。
   Rationale: D1 の書き込み頻度を抑えつつ、DO再起動やデプロイ切断後でも復帰できるようにするため。
+  Date/Author: 2025-12-15 / codex
+- Decision: `draw.committed` の `newBingoIds` は Mod/Admin のみに配信する（参加者/会場表示へは送らない）。
+  Rationale: 仕様（必要ならnewBingoリストは mod/admin のみ）に合わせ、情報の露出範囲を制御するため。
+  Date/Author: 2025-12-15 / codex
+- Decision: `/api/dev/create-session` は localhost からのリクエストに限定する。
+  Rationale: デプロイ時に残っても誰でもセッション作成できる状態を避けるため（ローカルMVP用途に限定）。
+  Date/Author: 2025-12-15 / codex
+- Decision: WebSocket 再接続は指数バックオフ + ジッターで行う。
+  Rationale: 瞬断/デプロイ後の同時再接続による負荷スパイクを避けるため。
   Date/Author: 2025-12-15 / codex
 
 ## Outcomes & Retrospective
@@ -185,3 +198,4 @@
 - 2025-12-15 01:14Z: 実装が完了したため、Progress を完了状態に更新し、認証方式・スポットライト揮発化などの意思決定と、型チェック上の発見を追記した。
 - 2025-12-15 02:51Z: ユーザー要求が「フル要件実装」に拡大したため、目的/進捗/手順/受け入れ条件をフル要件版に更新し、以後このExecPlanで実装を進める。
 - 2025-12-15 03:50Z: D1/DO/WS の整合と Web UI（Invite/Admin/Mod/Display/Participant）を要件に追従させ、音響導線/統計表示/負荷スクリプト/テストを追加した。
+- 2025-12-15 04:49Z: `newBingoIds` の秘匿、snapshot配信の計算最適化、WS再接続ジッター、`/api/dev/create-session` のローカル限定、webの型チェック修正を行った。

@@ -84,19 +84,19 @@ export default function HomePage() {
           </div>
         )}
 
-        {links && session.ok === true && (
+        {links && session && session.ok === true && (
           <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="text-lg font-semibold">セッション {session.sessionCode}</h2>
-            <div className="text-xs text-neutral-400">
+              <div className="text-xs text-neutral-400">
                 招待リンク（/i/:token）は GET で副作用なし。開いたら「入室」を押してください（POSTでcookie付与）。
+              </div>
             </div>
-          </div>
 
-          <div className="mt-4 grid gap-2 text-sm">
-            <a className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 hover:bg-neutral-950/70" href={links.join}>
-              参加者: {links.join}
-            </a>
+            <div className="mt-4 grid gap-2 text-sm">
+              <a className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 hover:bg-neutral-950/70" href={links.join}>
+                参加者: {links.join}
+              </a>
               <a
                 className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 hover:bg-neutral-950/70"
                 href={links.displayTen}

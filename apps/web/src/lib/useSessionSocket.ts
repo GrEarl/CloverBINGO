@@ -164,9 +164,21 @@ export function useSessionSocket(params: SocketParams) {
   const wsRef = useRef<WebSocket | null>(null);
   const disconnectedAtRef = useRef<number | null>(null);
   const offlineTimerRef = useRef<number | null>(null);
+  const retryAttemptRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
+    retryAttemptRef.current = 0;
+
+    function nextRetryDelayMs(attempt: number): number {
+      // Exponential backoff with jitter to avoid reconnect stampedes after deploy/network blips.
+      const exp = Math.min(7, Math.max(0, attempt)); // cap at 2^7
+      const base = 250;
+      const max = 8000;
+      const delay = Math.min(max, base * 2 ** exp);
+      const jitter = Math.floor(Math.random() * Math.min(1000, delay * 0.25));
+      return delay + jitter;
+    }
 
     function connect() {
       if (disposed) return;
@@ -175,6 +187,7 @@ export function useSessionSocket(params: SocketParams) {
       setStatus("reconnecting");
 
       ws.onopen = () => {
+        retryAttemptRef.current = 0;
         disconnectedAtRef.current = null;
         if (offlineTimerRef.current) window.clearTimeout(offlineTimerRef.current);
         offlineTimerRef.current = null;
@@ -190,7 +203,9 @@ export function useSessionSocket(params: SocketParams) {
           }, 4000);
         }
         if (disposed) return;
-        retryRef.current = window.setTimeout(connect, 700);
+        retryAttemptRef.current = Math.min(retryAttemptRef.current + 1, 50);
+        const delayMs = nextRetryDelayMs(retryAttemptRef.current);
+        retryRef.current = window.setTimeout(connect, delayMs);
       };
       ws.onmessage = (ev) => {
         if (typeof ev.data !== "string") return;

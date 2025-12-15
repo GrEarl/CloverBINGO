@@ -34,6 +34,10 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
   });
 }
 
+function isLocalhost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
 function getSessionStub(env: Bindings, sessionId: string): DurableObjectStub {
   const id = env.SESSIONS.idFromName(sessionId);
   return env.SESSIONS.get(id);
@@ -246,6 +250,9 @@ app.post("/api/mod/spotlight", async (c) => {
 });
 
 app.post("/api/dev/create-session", async (c) => {
+  const reqUrl = new URL(c.req.raw.url);
+  if (!isLocalhost(reqUrl.hostname)) return c.text("not found", 404);
+
   const db = getDb(c.env);
   const createdAt = new Date().toISOString();
 

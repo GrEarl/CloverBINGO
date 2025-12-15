@@ -52,6 +52,28 @@ type WsAttachment = {
   screen?: DisplayScreen;
 };
 
+type SpotlightPlayerSummary = {
+  id: string;
+  displayName: string;
+  progress: BingoProgress;
+};
+
+type PrivilegedPlayerSnapshot = {
+  id: string;
+  displayName: string;
+  joinedAt: number;
+  progress: BingoProgress;
+  card: BingoCard;
+};
+
+type SnapshotShared = {
+  stats: ReturnType<typeof computeSessionStats>;
+  lastNumber: number | null;
+  lastNumbers: number[];
+  spotlightPlayers: SpotlightPlayerSummary[];
+  getPrivilegedPlayers: () => PrivilegedPlayerSnapshot[];
+};
+
 function nowMs(): number {
   return Date.now();
 }
@@ -269,10 +291,10 @@ export class SessionDurableObject {
     return null;
   }
 
-  private buildSnapshot(attachment: WsAttachment | null): unknown {
-    if (!this.session) return { type: "snapshot", ok: false, error: "session not found" };
+  private createSnapshotShared(): SnapshotShared {
+    const playersList = Object.values(this.players);
 
-    const stats = computeSessionStats(Object.values(this.players).map((p) => p.progress));
+    const stats = computeSessionStats(playersList.map((p) => p.progress));
     const lastNumber = this.drawnNumbers.length > 0 ? this.drawnNumbers[this.drawnNumbers.length - 1] : null;
     const lastNumbers = this.drawnNumbers.slice(-10);
 
@@ -280,6 +302,28 @@ export class SessionDurableObject {
       .map((id) => this.players[id])
       .filter(Boolean)
       .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress }));
+
+    let privilegedCache: PrivilegedPlayerSnapshot[] | null = null;
+    function getPrivilegedPlayers(): PrivilegedPlayerSnapshot[] {
+      if (privilegedCache) return privilegedCache;
+      privilegedCache = playersList.map((p) => ({
+        id: p.id,
+        displayName: p.displayName,
+        joinedAt: p.joinedAt,
+        progress: p.progress,
+        card: p.card,
+      }));
+      return privilegedCache;
+    }
+
+    return { stats, lastNumber, lastNumbers, spotlightPlayers, getPrivilegedPlayers };
+  }
+
+  private buildSnapshot(attachment: WsAttachment | null, shared?: SnapshotShared): unknown {
+    if (!this.session) return { type: "snapshot", ok: false, error: "session not found" };
+
+    const computed = shared ?? this.createSnapshotShared();
+    const { stats, lastNumber, lastNumbers, spotlightPlayers } = computed;
 
     const base = {
       type: "snapshot",
@@ -338,13 +382,7 @@ export class SessionDurableObject {
       };
     }
 
-    const players = Object.values(this.players).map((p) => ({
-      id: p.id,
-      displayName: p.displayName,
-      joinedAt: p.joinedAt,
-      progress: p.progress,
-      card: p.card,
-    }));
+    const players = computed.getPrivilegedPlayers();
 
     if (attachment.role === "mod") {
       return {
@@ -377,15 +415,16 @@ export class SessionDurableObject {
     return base;
   }
 
-  private sendSnapshot(ws: WebSocket): void {
+  private sendSnapshot(ws: WebSocket, shared?: SnapshotShared): void {
     const attachment = getAttachmentFromWebSocket(ws);
-    ws.send(JSON.stringify(this.buildSnapshot(attachment)));
+    ws.send(JSON.stringify(this.buildSnapshot(attachment, shared)));
   }
 
   private broadcastSnapshots(): void {
+    const shared = this.createSnapshotShared();
     for (const ws of this.state.getWebSockets()) {
       try {
-        this.sendSnapshot(ws);
+        this.sendSnapshot(ws, shared);
       } catch {
         try {
           ws.close(1011, "snapshot failed");
@@ -550,16 +589,11 @@ export class SessionDurableObject {
     this.pendingDraw = null;
     this.touch();
 
+    const baseEvent = { type: "draw.committed" as const, seq, number, committedAt, stats };
+    this.broadcastEvent((a) => a?.role === "participant" || a?.role === "display", baseEvent);
     this.broadcastEvent(
-      (a) => Boolean(a),
-      {
-        type: "draw.committed",
-        seq,
-        number,
-        committedAt,
-        stats,
-        ...(newBingoIds.length ? { newBingoIds } : {}),
-      },
+      (a) => a?.role === "admin" || a?.role === "mod",
+      newBingoIds.length ? { ...baseEvent, newBingoIds } : baseEvent,
     );
     this.broadcastSnapshots();
     return null;
