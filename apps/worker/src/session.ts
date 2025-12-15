@@ -152,7 +152,7 @@ function computeImpact(players: Record<string, PlayerState>, hypotheticallyDrawn
   const nextDrawn = hypotheticallyDrawn.concat([nextNumber]);
   for (const player of Object.values(players)) {
     const progress = evaluateCard(player.card, nextDrawn);
-    if (progress.minMissingToLine === 1) reachPlayers += 1;
+    if (progress.reachLines > 0) reachPlayers += 1;
     if (progress.isBingo) bingoPlayers += 1;
   }
   return { reachPlayers, bingoPlayers };
