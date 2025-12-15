@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
-import { useSessionSocket, type AdminSnapshot } from "../lib/useSessionSocket";
+import { useSessionSocket, type AdminSnapshot, type ReelStatus, type ServerEvent } from "../lib/useSessionSocket";
 
 type Digit = "ten" | "one";
 type Action = "start" | "stop";
+
+type InviteEnterResponse =
+  | { ok: false; error?: string }
+  | { ok: true; role: "admin" | "mod"; sessionCode: string; redirectTo: string };
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -22,18 +26,45 @@ export default function AdminPage() {
   const code = params.code ?? "";
   const inviteToken = search.get("token") ?? "";
 
-  const { snapshot, connected } = useSessionSocket({ role: "admin", code });
+  const { snapshot, status, lastEvent } = useSessionSocket({ role: "admin", code });
   const view = useMemo(() => {
     if (!snapshot || snapshot.type !== "snapshot" || snapshot.ok !== true) return null;
     if ((snapshot as AdminSnapshot).role !== "admin") return null;
     return snapshot as AdminSnapshot;
   }, [snapshot]);
+  const viewRef = useRef<AdminSnapshot | null>(null);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const [error, setError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
   const [enterError, setEnterError] = useState<string | null>(null);
   const [enterToken, setEnterToken] = useState(inviteToken);
+
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const audioRef = useRef<{
+    spin: HTMLAudioElement;
+    stop: HTMLAudioElement;
+    commit: HTMLAudioElement;
+    bingo: HTMLAudioElement;
+  } | null>(null);
+  const prevReelRef = useRef<{ ten: ReelStatus; one: ReelStatus } | null>(null);
+  const nextHint = useMemo(() => {
+    if (!view) return "認証が必要（招待URLで入室）";
+    if (view.sessionStatus !== "active") return "セッション終了";
+    if (!view.pendingDraw) return "P (prepare) または W (十 start)";
+    const ten = view.pendingDraw.reel.ten;
+    const one = view.pendingDraw.reel.one;
+    if (ten === "idle" && one === "idle") return "W (十 start) → S (一 start) → A/D (stop)";
+    if (ten === "spinning" && one === "spinning") return "A / D (stop)";
+    if (ten === "idle") return "W (十 start)";
+    if (ten === "spinning") return "A (十 stop)";
+    if (one === "idle") return "S (一 start)";
+    if (one === "spinning") return "D (一 stop)";
+    return "P (prepare)";
+  }, [view]);
 
   async function prepare() {
     setError(null);
@@ -51,8 +82,9 @@ export default function AdminPage() {
     setEnterError(null);
     setEntering(true);
     try {
-      await postJson(`/api/admin/enter?code=${encodeURIComponent(code)}`, { token });
-      window.location.replace(`/admin/${code}`);
+      const res = await postJson<InviteEnterResponse>("/api/invite/enter", { token });
+      if (!res.ok) throw new Error(res.error ?? "enter failed");
+      window.location.replace(res.redirectTo);
     } catch (err) {
       setEnterError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -62,7 +94,9 @@ export default function AdminPage() {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (!view) return;
+      const current = viewRef.current;
+      if (!current) return;
+      if (current.sessionStatus !== "active") return;
       if (e.repeat) return;
       const key = e.key.toLowerCase();
       if (key === "p") void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
@@ -73,7 +107,107 @@ export default function AdminPage() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [code, view]);
+  }, [code]);
+
+  function safePlay(audio: HTMLAudioElement) {
+    try {
+      audio.currentTime = 0;
+      void audio.play();
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    if (!audioEnabled) return;
+    const aud = audioRef.current;
+    if (!aud) return;
+    const ev = lastEvent as ServerEvent | null;
+    if (!ev || ev.type !== "draw.committed") return;
+    if (Array.isArray(ev.newBingoIds) && ev.newBingoIds.length > 0) safePlay(aud.bingo);
+    else safePlay(aud.commit);
+  }, [audioEnabled, lastEvent]);
+
+  useEffect(() => {
+    const aud = audioRef.current;
+    const current = view?.pendingDraw?.reel ?? null;
+    const prev = prevReelRef.current;
+
+    if (audioEnabled && aud) {
+      if (prev && current) {
+        if (prev.ten === "spinning" && current.ten === "stopped") safePlay(aud.stop);
+        if (prev.one === "spinning" && current.one === "stopped") safePlay(aud.stop);
+      }
+      const spinning = Boolean(current && (current.ten === "spinning" || current.one === "spinning"));
+      if (spinning) {
+        try {
+          if (aud.spin.paused) void aud.spin.play();
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          aud.spin.pause();
+          aud.spin.currentTime = 0;
+        } catch {
+          // ignore
+        }
+      }
+    } else if (aud) {
+      try {
+        aud.spin.pause();
+        aud.spin.currentTime = 0;
+      } catch {
+        // ignore
+      }
+    }
+
+    prevReelRef.current = current ? { ten: current.ten, one: current.one } : null;
+    return () => {
+      if (!aud) return;
+      try {
+        aud.spin.pause();
+      } catch {
+        // ignore
+      }
+    };
+  }, [audioEnabled, view?.pendingDraw?.reel.ten, view?.pendingDraw?.reel.one]);
+
+  async function enableAudio() {
+    setError(null);
+    try {
+      const spin = new Audio("/sfx/spin.ogg");
+      spin.loop = true;
+      spin.volume = 0.7;
+      const stop = new Audio("/sfx/stop.ogg");
+      stop.volume = 0.9;
+      const commit = new Audio("/sfx/commit.ogg");
+      commit.volume = 0.8;
+      const bingo = new Audio("/sfx/bingo.ogg");
+      bingo.volume = 0.85;
+
+      audioRef.current = { spin, stop, commit, bingo };
+      setAudioEnabled(true);
+
+      // Unlock audio on user gesture
+      await stop.play();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "failed to enable audio");
+      setAudioEnabled(false);
+      audioRef.current = null;
+    }
+  }
+
+  async function endSession() {
+    setError(null);
+    try {
+      if (!window.confirm("セッションを終了します。以後、全操作は無効になります。よろしいですか？")) return;
+      setLastAction("end");
+      await postJson(`/api/admin/end?code=${encodeURIComponent(code)}`, {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    }
+  }
 
   return (
     <main className="min-h-dvh bg-neutral-950 text-neutral-50">
@@ -83,14 +217,20 @@ export default function AdminPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
             <div className="mt-1 text-sm text-neutral-400">
               セッション: <span className="font-mono text-neutral-200">{code}</span> / WS:{" "}
-              <span className={connected ? "text-emerald-300" : "text-amber-300"}>{connected ? "connected" : "reconnecting..."}</span>
+              <span
+                className={
+                  status === "connected" ? "text-emerald-300" : status === "offline" ? "text-red-200" : "text-amber-300"
+                }
+              >
+                {status}
+              </span>
             </div>
             <div className="mt-1 text-xs text-neutral-500">キー: P=prepare, W/A=十の位 start/stop, S/D=一の位 start/stop</div>
+            <div className="mt-1 text-xs text-neutral-500">
+              next: <span className="text-neutral-200">{nextHint}</span>
+            </div>
           </div>
-          <div className="text-xs text-neutral-500">
-            last: <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span> / bag:{" "}
-            <span className="font-mono text-neutral-200">{view?.bagRemaining ?? "—"}</span>
-          </div>
+          <div className="text-xs text-neutral-500">last: <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span></div>
         </div>
 
         <div className="mt-6 grid gap-4">
@@ -130,7 +270,7 @@ export default function AdminPage() {
               <button
                 className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400"
                 onClick={() => void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view}
+                disabled={!view || view.sessionStatus !== "active" || view.drawState === "spinning"}
                 type="button"
               >
                 P / Prepare
@@ -138,7 +278,7 @@ export default function AdminPage() {
               <button
                 className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
                 onClick={() => void reel("ten", "start").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view}
+                disabled={!view || view.sessionStatus !== "active"}
                 type="button"
               >
                 W / 十 start
@@ -146,7 +286,7 @@ export default function AdminPage() {
               <button
                 className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
                 onClick={() => void reel("ten", "stop").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view}
+                disabled={!view || view.sessionStatus !== "active"}
                 type="button"
               >
                 A / 十 stop
@@ -154,7 +294,7 @@ export default function AdminPage() {
               <button
                 className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
                 onClick={() => void reel("one", "start").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view}
+                disabled={!view || view.sessionStatus !== "active"}
                 type="button"
               >
                 S / 一 start
@@ -162,14 +302,48 @@ export default function AdminPage() {
               <button
                 className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
                 onClick={() => void reel("one", "stop").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view}
+                disabled={!view || view.sessionStatus !== "active"}
                 type="button"
               >
                 D / 一 stop
               </button>
+              <button
+                className="rounded-md border border-red-800/60 bg-red-950/20 px-3 py-2 text-sm text-red-200 hover:bg-red-950/40 disabled:opacity-60"
+                onClick={() => void endSession()}
+                disabled={!view || view.sessionStatus !== "active"}
+                type="button"
+              >
+                セッション終了
+              </button>
             </div>
 
             {error && <div className="mt-3 text-sm text-red-200">error: {error}</div>}
+
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-neutral-400">
+              <div>
+                status: <span className="text-neutral-200">{view?.sessionStatus ?? "—"}</span>
+                {view?.endedAt ? <span> / endedAt: {view.endedAt}</span> : null}
+              </div>
+              <div>
+                drawState: <span className="text-neutral-200">{view?.drawState ?? "—"}</span>
+              </div>
+              <div>
+                stats: reach <span className="text-neutral-200">{view?.stats?.reachPlayers ?? "—"}</span> / bingo{" "}
+                <span className="text-neutral-200">{view?.stats?.bingoPlayers ?? "—"}</span>
+              </div>
+              <div>
+                audio: <span className={audioEnabled ? "text-emerald-200" : "text-amber-200"}>{audioEnabled ? "enabled" : "disabled"}</span>
+              </div>
+              {!audioEnabled && (
+                <button
+                  className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70"
+                  onClick={() => void enableAudio()}
+                  type="button"
+                >
+                  音を有効化
+                </button>
+              )}
+            </div>
 
             <div className="mt-6 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">
               <div className="text-xs text-neutral-400">pendingDraw</div>

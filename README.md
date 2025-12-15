@@ -8,18 +8,22 @@
 
     npm install
 
-2) Worker + Web を同時起動（リポジトリ直下）
+2) ローカルDB（D1）へマイグレーション適用（初回/スキーマ更新時）
+
+    npm -w apps/worker run migrate:local
+
+3) Worker + Web を同時起動（リポジトリ直下）
 
     npm run dev
 
-3) ブラウザで開く
+4) ブラウザで開く
 
 - Web: `http://localhost:5173`（埋まっている場合は Vite が別ポートを使います）
 - Worker: `http://127.0.0.1:8787`
 
 トップ画面の「Dev: セッション作成」から、参加者/Admin/Mod/会場表示（十の位・一の位）のURLが出ます。
 
-※ Admin/Mod の招待リンクは URL に `?token=...` が含まれますが、GETでは副作用を起こしません。画面を開いたら「入室」を押して cookie を付与してから操作してください（入室後は token を URL から外しても動きます）。
+※ Admin/Mod の招待リンクは `/i/:token` です（GETでは副作用を起こしません）。画面を開いたら「入室」を押して cookie を付与してから操作してください（入室後は token を URL から外しても動きます）。
 
 ### Admin 操作（キーボード）
 
@@ -27,6 +31,7 @@
 - `W` / `A`: 十の位リール start / stop
 - `S` / `D`: 一の位リール start / stop（両方 stop で番号確定→参加者へ反映）
 - `P` を押し忘れても、`W` / `S`（start）を押すと自動で prepare されます（運用事故低減）。
+- 音（SE）を出すには Admin 画面で「音を有効化」を押してください（ブラウザの自動再生制限対策）。
 
 ## 仕様・計画
 
@@ -37,12 +42,18 @@
 
     npm test
 
+## WS 負荷確認（擬似接続）
+
+事前に Worker を起動しておきます（別ターミナルで `npm -w apps/worker run dev`）。
+
+    npm -w apps/worker run ws:load -- --code <SESSION_CODE> --count 200 --origin http://127.0.0.1:8787
+
 ## ローカル動作確認（手動スモーク）
 
 1) `npm run dev` を起動
 2) `http://localhost:5173` を開いて「Dev: セッション作成」
 3) 参加者URLをスマホ/別タブで複数開いて、表示名を入れて参加
-4) Admin画面（招待リンク）を開いて「入室」を押し、`P` → `W` → `A` → `S` → `D` を押す
+4) Admin招待リンク（`/i/:token`）を開いて「入室」を押し、`P` → `W` → `A` → `S` → `D` を押す
 5) 会場表示（ten/one）で数字が回転→停止し、参加者のカードと reach/bingo 指標が更新される
 
 ## デプロイ

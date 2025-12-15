@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --persist-to .wrangler/state --port 8787",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "migrate:local": "printf 'y\\n' | wrangler d1 migrations apply DB --local --persist-to .wrangler/state",
+    "create-session": "node scripts/create-session.mjs",
+    "ws:load": "node scripts/ws-load.mjs"
   },
   "dependencies": {
     "@cloverbingo/core": "0.0.0",
+    "drizzle-orm": "^0.45.1",
     "hono": "^4.11.0"
   },
   "devDependencies": {

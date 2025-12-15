@@ -8,12 +8,27 @@ function safeScreen(input: string | undefined): DisplayScreen | null {
   return null;
 }
 
+function fmtNum(n: number | null | undefined): string {
+  if (typeof n !== "number") return "—";
+  return String(n);
+}
+
+function relativeFromNow(ms: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 10) return "いま";
+  if (sec < 60) return `${sec}秒前`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}分前`;
+  const hr = Math.floor(min / 60);
+  return `${hr}時間前`;
+}
+
 export default function DisplayPage() {
   const params = useParams();
   const code = params.code ?? "";
   const screen = safeScreen(params.screen);
 
-  const { snapshot, connected } = useSessionSocket({ role: "display", code, screen: screen ?? "ten" });
+  const { snapshot, status } = useSessionSocket({ role: "display", code, screen: screen ?? "ten" });
   const view = useMemo(() => {
     if (!snapshot || snapshot.type !== "snapshot" || snapshot.ok !== true) return null;
     if ((snapshot as DisplaySnapshot).role !== "display") return null;
@@ -66,11 +81,30 @@ export default function DisplayPage() {
     );
   }
 
+  const spotlightIds = view?.spotlight?.ids ?? [];
+  const spotlightPlayers = view?.spotlight?.players ?? [];
+  const playerById = new Map<string, (typeof spotlightPlayers)[number]>();
+  for (const p of spotlightPlayers) playerById.set(p.id, p);
+  const sideIds = screen === "ten" ? spotlightIds.slice(0, 3) : spotlightIds.slice(3, 6);
+  const sidePlayers: Array<(typeof spotlightPlayers)[number] | null> = [];
+  for (let i = 0; i < 3; i += 1) {
+    const id = sideIds[i];
+    if (!id) {
+      sidePlayers.push(null);
+      continue;
+    }
+    sidePlayers.push(playerById.get(id) ?? null);
+  }
+  const emptySlots = sidePlayers.filter((p) => !p).length;
+
   return (
     <main className="min-h-dvh bg-neutral-950 text-neutral-50">
       <div className="fixed left-4 top-4 flex items-center gap-3">
         <div className="rounded-md border border-neutral-800 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-200">
-          {code} / {screen} / {connected ? "WS ok" : "WS..."}
+          {code} / {screen} /{" "}
+          <span className={status === "connected" ? "text-emerald-200" : status === "offline" ? "text-red-200" : "text-amber-200"}>
+            {status}
+          </span>
         </div>
         <button
           className="rounded-md border border-neutral-800 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70"
@@ -81,23 +115,220 @@ export default function DisplayPage() {
         </button>
       </div>
 
-      <div className="flex min-h-dvh items-center justify-center px-6">
-        <div className="text-center">
-          <div
-            className={[
-              "font-black tabular-nums tracking-tight",
-              "text-[38vw] leading-none md:text-[26vw]",
-              view?.reel.status === "spinning" ? "text-amber-200 drop-shadow-[0_0_60px_rgba(251,191,36,0.25)]" : "text-neutral-50",
-            ].join(" ")}
-          >
-            {shownDigit ?? "—"}
-          </div>
-          <div className="mt-2 text-sm text-neutral-400">
-            {view?.reel.status ?? "idle"} / last: {view?.lastNumber ?? "—"}
+      <div className="grid min-h-dvh grid-cols-1 gap-6 px-6 pb-10 pt-20 lg:grid-cols-[minmax(0,340px)_1fr_minmax(0,340px)] lg:items-stretch">
+        {/* Outer side: spotlight (or detailed stats) */}
+        {screen === "ten" ? (
+          <aside className="grid gap-4 lg:order-1">
+            {sidePlayers.map((p, idx) => (
+              <div key={`${idx}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+                {p ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="truncate text-lg font-semibold text-neutral-50">{p.displayName}</div>
+                      {p.progress.isBingo && <div className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs text-emerald-200">BINGO</div>}
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-neutral-300">
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">min</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.minMissingToLine}</div>
+                      </div>
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">reach</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.reachLines}</div>
+                      </div>
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">lines</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.bingoLines}</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-neutral-400">
+                    <div className="text-xs text-neutral-500">統計（詳細）</div>
+                    <div className="mt-2 grid gap-1">
+                      <div>
+                        0手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        1手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        2手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        3+: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </aside>
+        ) : (
+          <aside className="grid gap-4 lg:order-1">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+              <div className="text-xs text-neutral-500">統計（コア）</div>
+              <div className="mt-3 grid gap-2 text-sm text-neutral-200">
+                <div>
+                  draw: <span className="font-mono text-neutral-50">{view?.drawCount ?? "—"}</span> / 75
+                </div>
+                <div>
+                  reach: <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span>
+                </div>
+                <div>
+                  bingo: <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+              <div className="text-xs text-neutral-500">直近</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
+                  <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                    {n}
+                  </div>
+                ))}
+                {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+              <div className="text-xs text-neutral-500">スポットライト</div>
+              <div className="mt-2 text-sm text-neutral-300">
+                v{fmtNum(view?.spotlight?.version)} / {view?.spotlight?.updatedBy ?? "—"} /{" "}
+                {view?.spotlight?.updatedAt ? relativeFromNow(view.spotlight.updatedAt) : "—"}
+              </div>
+              <div className="mt-3 grid gap-2">
+                {sidePlayers.map((p, idx) => (
+                  <div key={idx} className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm text-neutral-200">
+                    {p?.displayName ?? "（未選択）"}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* Center: reel */}
+        <div className="flex items-center justify-center lg:order-2">
+          <div className="text-center">
+            <div
+              className={[
+                "font-black tabular-nums tracking-tight",
+                "text-[42vw] leading-none md:text-[26vw]",
+                view?.reel.status === "spinning" ? "text-amber-200 drop-shadow-[0_0_60px_rgba(251,191,36,0.25)]" : "text-neutral-50",
+              ].join(" ")}
+            >
+              {shownDigit ?? "—"}
+            </div>
+            <div className="mt-2 text-sm text-neutral-400">
+              reel: <span className="text-neutral-200">{view?.reel.status ?? "idle"}</span> / last:{" "}
+              <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
+            </div>
+            {view?.sessionStatus === "ended" && (
+              <div className="mt-4 rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-sm text-amber-200">
+                セッションは終了しました。
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Inner side: stats core / spotlight */}
+        {screen === "ten" ? (
+          <aside className="grid gap-4 lg:order-3">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+              <div className="text-xs text-neutral-500">統計（コア）</div>
+              <div className="mt-3 grid gap-2 text-sm text-neutral-200">
+                <div>
+                  draw: <span className="font-mono text-neutral-50">{view?.drawCount ?? "—"}</span> / 75
+                </div>
+                <div>
+                  reach: <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span>
+                </div>
+                <div>
+                  bingo: <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+              <div className="text-xs text-neutral-500">直近</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
+                  <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                    {n}
+                  </div>
+                ))}
+                {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+              </div>
+            </div>
+            {emptySlots > 0 && (
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+                <div className="text-xs text-neutral-500">統計（詳細）</div>
+                <div className="mt-2 grid gap-1 text-sm text-neutral-300">
+                  <div>
+                    0手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
+                  </div>
+                  <div>
+                    1手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
+                  </div>
+                  <div>
+                    2手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
+                  </div>
+                  <div>
+                    3+: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </aside>
+        ) : (
+          <aside className="grid gap-4 lg:order-3">
+            {sidePlayers.map((p, idx) => (
+              <div key={`${idx}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+                {p ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="truncate text-lg font-semibold text-neutral-50">{p.displayName}</div>
+                      {p.progress.isBingo && <div className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs text-emerald-200">BINGO</div>}
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-neutral-300">
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">min</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.minMissingToLine}</div>
+                      </div>
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">reach</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.reachLines}</div>
+                      </div>
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
+                        <div className="text-[0.65rem] text-neutral-500">lines</div>
+                        <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.bingoLines}</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-neutral-400">
+                    <div className="text-xs text-neutral-500">統計（詳細）</div>
+                    <div className="mt-2 grid gap-1">
+                      <div>
+                        0手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        1手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        2手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
+                      </div>
+                      <div>
+                        3+: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </aside>
+        )}
       </div>
     </main>
   );
 }
-

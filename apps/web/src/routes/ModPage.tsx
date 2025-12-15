@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import BingoCard from "../components/BingoCard";
 import { useLocalStorageString } from "../lib/useLocalStorage";
 import { useSessionSocket, type ModSnapshot, type Player } from "../lib/useSessionSocket";
 
@@ -20,13 +21,23 @@ function sortPlayers(a: Player, b: Player): number {
   return a.displayName.localeCompare(b.displayName, "ja");
 }
 
+function relativeFromNow(ms: number): string {
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 10) return "いま";
+  if (sec < 60) return `${sec}秒前`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}分前`;
+  const hr = Math.floor(min / 60);
+  return `${hr}時間前`;
+}
+
 export default function ModPage() {
   const params = useParams();
   const [search] = useSearchParams();
   const code = params.code ?? "";
   const inviteToken = search.get("token") ?? "";
 
-  const { snapshot, connected } = useSessionSocket({ role: "mod", code });
+  const { snapshot, status } = useSessionSocket({ role: "mod", code });
   const view = useMemo(() => {
     if (!snapshot || snapshot.type !== "snapshot" || snapshot.ok !== true) return null;
     if ((snapshot as ModSnapshot).role !== "mod") return null;
@@ -41,6 +52,8 @@ export default function ModPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didInitDraft = useRef(false);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const clientIdKey = `cloverbingo:mod:${code}:clientId`;
   const [clientId, setClientId] = useLocalStorageString(clientIdKey, "");
@@ -52,6 +65,7 @@ export default function ModPage() {
   useEffect(() => {
     didInitDraft.current = false;
     setDraft([]);
+    setSelectedId(null);
   }, [code]);
 
   useEffect(() => {
@@ -59,13 +73,24 @@ export default function ModPage() {
     if (didInitDraft.current) return;
     didInitDraft.current = true;
     setDraft(view.spotlight.ids);
-  }, [view?.spotlight?.updatedAt]);
+  }, [view?.spotlight?.version]);
 
   const players = useMemo(() => {
     const list = view?.players ? [...view.players] : [];
     list.sort(sortPlayers);
     return list;
   }, [view?.players]);
+
+  const filteredPlayers = useMemo(() => {
+    if (!query.trim()) return players;
+    const q = query.trim().toLowerCase();
+    return players.filter((p) => p.displayName.toLowerCase().includes(q) || p.id.toLowerCase().includes(q));
+  }, [players, query]);
+
+  const selectedPlayer = useMemo(() => {
+    if (!selectedId) return null;
+    return players.find((p) => p.id === selectedId) ?? null;
+  }, [players, selectedId]);
 
   function toggle(id: string) {
     setDraft((prev) => {
@@ -79,8 +104,8 @@ export default function ModPage() {
     setEnterError(null);
     setEntering(true);
     try {
-      await postJson(`/api/mod/enter?code=${encodeURIComponent(code)}`, { token });
-      window.location.replace(`/mod/${code}`);
+      const res = await postJson<{ ok: true; redirectTo: string }>("/api/invite/enter", { token });
+      window.location.replace(res.redirectTo);
     } catch (err) {
       setEnterError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -108,15 +133,24 @@ export default function ModPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Mod</h1>
             <div className="mt-1 text-sm text-neutral-400">
               セッション: <span className="font-mono text-neutral-200">{code}</span> / WS:{" "}
-              <span className={connected ? "text-emerald-300" : "text-amber-300"}>{connected ? "connected" : "reconnecting..."}</span>
+              <span className={status === "connected" ? "text-emerald-300" : status === "offline" ? "text-red-200" : "text-amber-300"}>
+                {status}
+              </span>
             </div>
             <div className="mt-1 text-xs text-neutral-500">スポットライトは「下書き→送信」の2段階（最大6人）。</div>
           </div>
           <div className="text-xs text-neutral-500">
-            players: <span className="font-mono text-neutral-200">{players.length}</span> / last:{" "}
+            players: <span className="font-mono text-neutral-200">{players.length}</span> / shown:{" "}
+            <span className="font-mono text-neutral-200">{filteredPlayers.length}</span> / last:{" "}
             <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
           </div>
         </div>
+
+        {view?.sessionStatus === "ended" && (
+          <div className="mt-6 rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-sm text-amber-200">
+            このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+          </div>
+        )}
 
         <div className="mt-6 grid gap-4">
           {!view && (
@@ -149,7 +183,7 @@ export default function ModPage() {
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70 disabled:opacity-60"
-                  disabled={sending || !view}
+                  disabled={sending || !view || view.sessionStatus !== "active"}
                   onClick={() => setDraft([])}
                   type="button"
                 >
@@ -157,7 +191,7 @@ export default function ModPage() {
                 </button>
                 <button
                   className="rounded-md bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                  disabled={sending || !view}
+                  disabled={sending || !view || view.sessionStatus !== "active"}
                   onClick={() => void send()}
                   type="button"
                 >
@@ -170,7 +204,8 @@ export default function ModPage() {
               現在: {view?.spotlight?.ids?.length ?? 0}人 / 下書き: {draft.length}人（最大6）
             </div>
             <div className="mt-1 text-xs text-neutral-500">
-              spotlight: v{view?.spotlight?.version ?? "—"} / updatedBy {view?.spotlight?.updatedBy ?? "—"}
+              spotlight: v{view?.spotlight?.version ?? "—"} / updatedBy {view?.spotlight?.updatedBy ?? "—"} /{" "}
+              {view?.spotlight?.updatedAt ? relativeFromNow(view.spotlight.updatedAt) : "—"}
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -199,6 +234,50 @@ export default function ModPage() {
 
           <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
             <h2 className="text-base font-semibold">参加者一覧</h2>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <input
+                className="w-full max-w-sm rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+                placeholder="検索（名前/ID）"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {selectedPlayer && (
+                <div className="text-xs text-neutral-400">
+                  選択中: <span className="font-mono text-neutral-200">{selectedPlayer.id}</span>
+                </div>
+              )}
+            </div>
+
+            {selectedPlayer && (
+              <div className="mt-4 grid gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-neutral-50">{selectedPlayer.displayName}</div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      min {selectedPlayer.progress.minMissingToLine} / reach {selectedPlayer.progress.reachLines} / bingoLines {selectedPlayer.progress.bingoLines}{" "}
+                      {selectedPlayer.progress.isBingo ? <span className="text-emerald-200">/ BINGO</span> : null}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70"
+                      onClick={() => {
+                        toggle(selectedPlayer.id);
+                      }}
+                      type="button"
+                    >
+                      {draft.includes(selectedPlayer.id) ? "★ 下書きから外す" : "★ 下書きに追加"}
+                    </button>
+                  </div>
+                </div>
+                {selectedPlayer.card ? (
+                  <BingoCard card={selectedPlayer.card} drawnNumbers={view?.drawnNumbers ?? []} />
+                ) : (
+                  <div className="text-sm text-neutral-400">カードなし</div>
+                )}
+              </div>
+            )}
+
             <div className="mt-3 overflow-hidden rounded-lg border border-neutral-800">
               <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-3 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-400">
                 <div>★</div>
@@ -208,7 +287,7 @@ export default function ModPage() {
                 <div className="text-right">bingo</div>
               </div>
               <div className="max-h-[60vh] overflow-auto">
-                {players.map((p) => {
+                {filteredPlayers.map((p) => {
                   const selected = draft.includes(p.id);
                   const isBingo = p.progress.isBingo;
                   return (
@@ -220,7 +299,10 @@ export default function ModPage() {
                         selected ? "bg-emerald-500/10" : "bg-transparent",
                         "hover:bg-neutral-950/60",
                       ].join(" ")}
-                      onClick={() => toggle(p.id)}
+                      onClick={() => {
+                        setSelectedId(p.id);
+                        toggle(p.id);
+                      }}
                       type="button"
                       title={p.id}
                     >

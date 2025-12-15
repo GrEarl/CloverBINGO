@@ -18,7 +18,7 @@ export default function ParticipantPage() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  const { snapshot, connected } = useSessionSocket({ role: "participant", code, playerId: playerId || undefined });
+  const { snapshot, status } = useSessionSocket({ role: "participant", code, playerId: playerId || undefined });
   const view = useMemo(() => {
     if (!snapshot || snapshot.type !== "snapshot" || snapshot.ok !== true) return null;
     if ((snapshot as ParticipantSnapshot).role !== "participant") return null;
@@ -66,9 +66,17 @@ export default function ParticipantPage() {
           </div>
           <div className="text-xs text-neutral-400">
             WS:{" "}
-            <span className={connected ? "text-emerald-300" : "text-amber-300"}>{connected ? "connected" : "reconnecting..."}</span>
+            <span className={status === "connected" ? "text-emerald-300" : status === "offline" ? "text-red-200" : "text-amber-300"}>
+              {status}
+            </span>
           </div>
         </div>
+
+        {view?.sessionStatus === "ended" && (
+          <div className="mt-6 rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-sm text-amber-200">
+            このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+          </div>
+        )}
 
         {!playerId && (
           <div className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
@@ -82,7 +90,7 @@ export default function ParticipantPage() {
               />
               <button
                 className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                disabled={joining || joinName.trim().length === 0}
+                disabled={joining || joinName.trim().length === 0 || view?.sessionStatus === "ended"}
                 onClick={join}
                 type="button"
               >
