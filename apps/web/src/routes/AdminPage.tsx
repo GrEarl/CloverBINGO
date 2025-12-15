@@ -240,14 +240,42 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
+    function isEditableTarget(target: EventTarget | null): boolean {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+      if (el.isContentEditable) return true;
+      return false;
+    }
+
     function onKeyDown(e: KeyboardEvent) {
       const current = viewRef.current;
       if (!current) return;
       if (current.sessionStatus !== "active") return;
       if (e.repeat) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isEditableTarget(e.target)) return;
+
       const key = e.key.toLowerCase();
-      if (key === "p") void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
+      if (key === "p") {
+        if (current.drawState === "spinning") {
+          setError("回転中は Prepare できません。停止するまで待ってください。");
+          return;
+        }
+        void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
+        return;
+      }
       if (key === "w" || key === "a" || key === "s" || key === "d") {
+        const pending = current.pendingDraw;
+        if (!pending) {
+          setError("先に P / Prepare を押してください。");
+          return;
+        }
+        if (pending.state !== "prepared" || pending.reel.ten !== "idle" || pending.reel.one !== "idle") {
+          setError("抽選中のため GO できません。");
+          return;
+        }
         void go().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
       }
     }

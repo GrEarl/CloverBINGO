@@ -65,6 +65,10 @@ export default function ModPage() {
   const clientIdKey = `cloverbingo:mod:${code}:clientId`;
   const [clientId, setClientId] = useLocalStorageString(clientIdKey, "");
 
+  const operatorNameKey = "cloverbingo:mod:operatorName";
+  const [operatorName, setOperatorName] = useLocalStorageString(operatorNameKey, "");
+  const effectiveUpdatedBy = operatorName.trim() ? operatorName.trim() : clientId;
+
   useEffect(() => {
     if (!clientId) setClientId(crypto.randomUUID().slice(0, 8));
   }, [clientId, setClientId]);
@@ -133,7 +137,7 @@ export default function ModPage() {
     setSending(true);
     setError(null);
     try {
-      await postJson(`/api/mod/spotlight?code=${encodeURIComponent(code)}`, { spotlight: draft, updatedBy: clientId });
+      await postJson(`/api/mod/spotlight?code=${encodeURIComponent(code)}`, { spotlight: draft, updatedBy: effectiveUpdatedBy });
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -153,6 +157,16 @@ export default function ModPage() {
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <WsStatusPill status={status} />
               <div className="text-xs text-neutral-500">スポットライトは「下書き→送信」の2段階（最大6人）。</div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+              <div>更新者名</div>
+              <Input
+                className="w-44 py-1 text-xs"
+                placeholder="例: MC-A"
+                value={operatorName}
+                onChange={(e) => setOperatorName(e.target.value)}
+              />
+              <div className="text-neutral-600">表示: {effectiveUpdatedBy || "?"}</div>
             </div>
           </div>
           <div className="text-xs text-neutral-500">

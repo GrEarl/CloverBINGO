@@ -251,6 +251,12 @@ export default function DisplayPage() {
         </Button>
       </div>
 
+      {status !== "connected" && (
+        <div className="fixed bottom-4 left-4 z-50">
+          <WsStatusPill status={status} className="px-4 py-2 text-sm" />
+        </div>
+      )}
+
       <div className="grid min-h-dvh grid-cols-1 gap-6 px-6 pb-10 pt-20 lg:grid-cols-[minmax(0,340px)_1fr_minmax(0,340px)] lg:items-stretch">
         {/* Outer side: spotlight (or detailed stats) */}
         {screen === "ten" ? (

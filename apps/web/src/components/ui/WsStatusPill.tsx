@@ -5,9 +5,9 @@ import { cn } from "../../lib/cn";
 export type WsStatus = "connected" | "reconnecting" | "offline";
 
 const labelByStatus: Record<WsStatus, string> = {
-  connected: "Connected",
-  reconnecting: "Reconnecting",
-  offline: "Offline",
+  connected: "接続中",
+  reconnecting: "再接続中",
+  offline: "オフライン",
 };
 
 export type WsStatusPillProps = {
