@@ -19,6 +19,7 @@ export type Player = {
 };
 
 export type SpotlightSnapshot = {
+  version: number;
   ids: string[];
   updatedAt: number;
   updatedBy: string | null;
@@ -100,8 +101,8 @@ export type Snapshot =
 type SocketParams =
   | { role: "participant"; code: string; playerId?: string }
   | { role: "display"; code: string; screen: DisplayScreen }
-  | { role: "admin"; code: string; token: string }
-  | { role: "mod"; code: string; token: string };
+  | { role: "admin"; code: string }
+  | { role: "mod"; code: string };
 
 function buildWebSocketUrl(params: SocketParams): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -111,8 +112,6 @@ function buildWebSocketUrl(params: SocketParams): string {
 
   if (params.role === "participant" && params.playerId) url.searchParams.set("playerId", params.playerId);
   if (params.role === "display") url.searchParams.set("screen", params.screen);
-  if (params.role === "admin") url.searchParams.set("token", params.token);
-  if (params.role === "mod") url.searchParams.set("token", params.token);
 
   return url.toString();
 }
@@ -164,4 +163,3 @@ export function useSessionSocket(params: SocketParams) {
 
   return { snapshot, connected };
 }
-

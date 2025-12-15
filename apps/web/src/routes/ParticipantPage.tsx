@@ -125,11 +125,17 @@ export default function ParticipantPage() {
                 )}
               </div>
 
+              {view && view.player === null && (
+                <div className="mt-6 rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-sm text-amber-200">
+                  参加情報が見つかりませんでした（playerId が無効の可能性があります）。「名前を変える（再参加）」を押してください。
+                </div>
+              )}
+
               {view?.player?.card ? (
                 <div className="mt-6">
                   <BingoCard card={view.player.card} drawnNumbers={view.drawnNumbers} />
                 </div>
-              ) : (
+              ) : view && view.player === null ? null : (
                 <div className="mt-6 text-sm text-neutral-400">カードを読み込み中...</div>
               )}
             </div>
@@ -158,4 +164,3 @@ export default function ParticipantPage() {
     </main>
   );
 }
-

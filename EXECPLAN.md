@@ -20,10 +20,16 @@ MVPの合格ラインは「参加登録→カード配布→抽選反映→リ�
 - [x] (2025-12-14 19:36Z) Worker から `packages/core` を参照し、サーバ側で reach/bingo 指標を計算して配信するようにした。
 - [ ] Web から `packages/core` を参照し、クライアント側でも表示用の補助計算（例：マーク表示）を共通化する（必要なら）。
 - [x] (2025-12-14 19:44Z) ローカル起動手順と最低限の運用メモ（キー操作）を `README.md` に追記した。
+- [x] (2025-12-15 01:14Z) 会場表示が prepare 後に `—` になり得る不具合を修正し、確定前に次番号が漏れない表示にした。
+- [x] (2025-12-15 01:14Z) Admin の `W/A/S/D`（reel）で pending が無い場合は `start` を契機に自動で prepare して進行できるようにした。
+- [x] (2025-12-15 01:14Z) スポットライトを揮発化し、`version` 付き LWW として配信するようにした（永続ストレージに保存しない）。
+- [x] (2025-12-15 01:14Z) Admin/Mod の token を WS/通常API の query から外し、招待リンク（GET）→入室（POSTで HttpOnly cookie 付与）に変更した。
+- [x] (2025-12-15 01:14Z) 参加者の playerId 不整合時に再参加導線を出し、Mod の下書き初期化をセッション切替で正しくした。
 
 ## Surprises & Discoveries
 
 - npm workspaces では `workspace:*` プロトコルが使えなかったため、内部依存はバージョン一致（例：`0.0.0`）で解決する形にした。
+- `apps/worker` の `tsconfig` を strict のまま `tsc` に通すと、依存（hono）の型定義でエラーになることがあったため、`skipLibCheck` を有効化した（型チェック対象を自分のコードに寄せる）。
 
 ## Decision Log
 
@@ -36,6 +42,12 @@ MVPの合格ラインは「参加登録→カード配布→抽選反映→リ�
 - Decision: workspace間依存は `workspace:*` ではなく、同一 version（`0.0.0`）指定で npm の workspace 解決に任せる。
   Rationale: 現環境の npm では `workspace:` プロトコルが `EUNSUPPORTEDPROTOCOL` になったため。
   Date/Author: 2025-12-14 / codex
+- Decision: Admin/Mod は token を URL（GET）で配るが、認証は「入室（POST）で HttpOnly cookie を付与」し、WS/通常API は cookie で通す。
+  Rationale: Slack/Discord のリンクプレビュー等で GET が先に叩かれても副作用を起こさないため。token を WS/通常API の query に載せないことで漏えい面を減らす。
+  Date/Author: 2025-12-15 / codex
+- Decision: スポットライトは揮発（DOメモリ）で管理し、`version` を単調増加して LWW とする。
+  Rationale: 永続化が不要で、複数Modの競合もシンプルに扱えるため。
+  Date/Author: 2025-12-15 / codex
 
 ## Outcomes & Retrospective
 
@@ -43,7 +55,15 @@ MVPの合格ラインは「参加登録→カード配布→抽選反映→リ�
 
 ## Context and Orientation
 
-現状、リポジトリ直下には `AGENTS.md` / `README.md` / `audio_ogg/` があり、アプリコードはまだありません。音源（スロット系SE/BGM）が `audio_ogg/` に同梱されています。これを Web 側の静的アセットとして配信できる形にします。
+現状は npm workspaces のモノレポで、Worker / Web / 共通ロジック（core）が揃っている状態です。音源（スロット系SE/BGM）は `audio_ogg/` に同梱されています。
+
+主要なコードの場所:
+
+- `apps/worker/src/index.ts`: Worker の HTTP ルーティング（`/api/*`）と Durable Object へのフォワード。
+- `apps/worker/src/session.ts`: セッション単位の Durable Object（参加者、抽選、スポットライト、WSスナップショット配信）。
+- `apps/web/src/routes/*`: 画面（Home/参加者/会場表示/Admin/Mod）。
+- `apps/web/src/lib/useSessionSocket.ts`: 画面共通の WebSocket 接続（スナップショット受信、再接続）。
+- `packages/core/src/bingo.ts`: 75-ballカード生成、ライン判定（reach/bingo/minMissingToLine）。
 
 この ExecPlan で使う用語（最小定義）:
 
@@ -60,8 +80,8 @@ API と UI は MVP に必要な最短動線のみ実装します:
 
 - 参加者: `/s/:code` で表示名登録→カード表示→抽選の反映とリーチ/ビンゴ表示。
 - 会場表示: `/s/:code/display/ten` と `/s/:code/display/one` で 0-9 のリール表示（十の位/一の位）。抽選確定で止まる。
-- Admin: `/admin/:code?token=...` で prepare と go（キーボード優先）。prepare の結果（次番号）は Admin のみに表示。
-- Mod: `/mod/:code?token=...` で参加者俯瞰、スポットライト下書き→送信（即時反映しない2段階）と LWW 表示。
+- Admin: `/admin/:code` で prepare と go（キーボード優先）。招待リンク（`/admin/:code?token=...`）は「入室」（POST）で cookie を付与してから操作する。prepare の結果（次番号）は Admin のみに表示。
+- Mod: `/mod/:code` で参加者俯瞰、スポットライト下書き→送信（即時反映しない2段階）を行う。招待リンク（`/mod/:code?token=...`）は「入室」（POST）で cookie を付与してから操作する。スポットライトは `version` 付き LWW として扱う。
 
 状態同期は「再接続で復帰できる」ことを最優先にし、各画面は初回接続でスナップショットを受け取り、以後は差分/イベントを適用する設計にします（最初はスナップショット頻繁送付でも可。200人規模を見据えて後で最適化）。
 
@@ -104,8 +124,17 @@ API と UI は MVP に必要な最短動線のみ実装します:
 
 このMVPで最低限揃えるインターフェース（案。実装に合わせて更新）:
 
-- WebSocket: `GET /api/ws?code=<sessionCode>&role=<participant|display|admin|mod>&token=<optional>` → 接続後に `snapshot` を受信。
-- Admin prepare: `POST /api/admin/prepare`（code/token 必須）→ 次番号の予約（Admin のみ参照可能）。
-- Admin go: `POST /api/admin/go`（code/token 必須）→ 抽選確定、commit、全クライアントに broadcast。
-- Participant join: `POST /api/participant/join` → playerId 発行、カード配布。
-- Mod spotlight: `POST /api/mod/spotlight` → spotlight 更新（LWW で衝突解決）。
+- WebSocket: `GET /api/ws?code=<sessionCode>&role=<participant|display|admin|mod>` → 接続後に `snapshot` を受信（admin/mod は cookie で認証する。participant は `playerId`、display は `screen` を query に持つ）。
+- Admin enter: `POST /api/admin/enter?code=<sessionCode>`（bodyにtoken）→ HttpOnly cookie を付与する（GETは副作用なし）。
+- Mod enter: `POST /api/mod/enter?code=<sessionCode>`（bodyにtoken）→ HttpOnly cookie を付与する（GETは副作用なし）。
+- Admin prepare: `POST /api/admin/prepare?code=<sessionCode>` → 次番号の予約（Admin のみ参照可能）。
+- Admin reel: `POST /api/admin/reel?code=<sessionCode>` → `digit` と `action`（start/stop）で回転・停止を制御し、両方停止で確定する。
+- Participant join: `POST /api/participant/join?code=<sessionCode>` → playerId 発行、カード配布。
+- Mod spotlight: `POST /api/mod/spotlight?code=<sessionCode>` → spotlight 更新（揮発、version 付き LWW）。
+
+---
+
+（更新メモ）
+
+- 2025-12-15 00:56Z: レビューで見つかった不具合（会場表示の `—`、reel の自動 prepare、スポットライト揮発+version、Admin/Mod 認証の cookie 化、UIの再参加導線）を修正するため、Progress/Context/Interfaces を現状に合わせて更新した。
+- 2025-12-15 01:14Z: 実装が完了したため、Progress を完了状態に更新し、認証方式・スポットライト揮発化などの意思決定と、型チェック上の発見を追記した。

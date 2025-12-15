@@ -51,6 +51,12 @@ app.post("/api/participant/join", async (c) => {
   return forwardToSession(c, code, "/participant/join");
 });
 
+app.post("/api/admin/enter", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  return forwardToSession(c, code, "/admin/enter");
+});
+
 app.post("/api/admin/prepare", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);
@@ -61,6 +67,12 @@ app.post("/api/admin/reel", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);
   return forwardToSession(c, code, "/admin/reel");
+});
+
+app.post("/api/mod/enter", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  return forwardToSession(c, code, "/mod/enter");
 });
 
 app.post("/api/mod/spotlight", async (c) => {

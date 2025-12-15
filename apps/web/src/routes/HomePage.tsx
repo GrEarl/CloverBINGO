@@ -81,7 +81,7 @@ export default function HomePage() {
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h2 className="text-lg font-semibold">セッション {session.sessionCode}</h2>
               <div className="text-xs text-neutral-400">
-                adminToken / modToken は URL に含まれます（ローカルMVP用）
+                招待リンクには token が含まれます（GETは副作用なし）。開いたら「入室」を押してください。
               </div>
             </div>
 
@@ -127,4 +127,3 @@ export default function HomePage() {
     </main>
   );
 }
-

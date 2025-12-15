@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import { useLocalStorageString } from "../lib/useLocalStorage";
 import { useSessionSocket, type ModSnapshot, type Player } from "../lib/useSessionSocket";
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
@@ -23,19 +24,35 @@ export default function ModPage() {
   const params = useParams();
   const [search] = useSearchParams();
   const code = params.code ?? "";
-  const token = search.get("token") ?? "";
+  const inviteToken = search.get("token") ?? "";
 
-  const { snapshot, connected } = useSessionSocket({ role: "mod", code, token });
+  const { snapshot, connected } = useSessionSocket({ role: "mod", code });
   const view = useMemo(() => {
     if (!snapshot || snapshot.type !== "snapshot" || snapshot.ok !== true) return null;
     if ((snapshot as ModSnapshot).role !== "mod") return null;
     return snapshot as ModSnapshot;
   }, [snapshot]);
 
+  const [entering, setEntering] = useState(false);
+  const [enterError, setEnterError] = useState<string | null>(null);
+  const [enterToken, setEnterToken] = useState(inviteToken);
+
   const [draft, setDraft] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didInitDraft = useRef(false);
+
+  const clientIdKey = `cloverbingo:mod:${code}:clientId`;
+  const [clientId, setClientId] = useLocalStorageString(clientIdKey, "");
+
+  useEffect(() => {
+    if (!clientId) setClientId(crypto.randomUUID().slice(0, 8));
+  }, [clientId, setClientId]);
+
+  useEffect(() => {
+    didInitDraft.current = false;
+    setDraft([]);
+  }, [code]);
 
   useEffect(() => {
     if (!view) return;
@@ -58,27 +75,29 @@ export default function ModPage() {
     });
   }
 
+  async function enter(token: string) {
+    setEnterError(null);
+    setEntering(true);
+    try {
+      await postJson(`/api/mod/enter?code=${encodeURIComponent(code)}`, { token });
+      window.location.replace(`/mod/${code}`);
+    } catch (err) {
+      setEnterError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setEntering(false);
+    }
+  }
+
   async function send() {
     setSending(true);
     setError(null);
     try {
-      await postJson(`/api/mod/spotlight?code=${encodeURIComponent(code)}&token=${encodeURIComponent(token)}`, { spotlight: draft });
+      await postJson(`/api/mod/spotlight?code=${encodeURIComponent(code)}`, { spotlight: draft, updatedBy: clientId });
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
       setSending(false);
     }
-  }
-
-  if (!token) {
-    return (
-      <main className="min-h-dvh bg-neutral-950 text-neutral-50">
-        <div className="mx-auto max-w-xl px-6 py-10">
-          <h1 className="text-xl font-semibold">Mod</h1>
-          <p className="mt-2 text-sm text-neutral-300">token が必要です。URL に ?token=... を付けてください。</p>
-        </div>
-      </main>
-    );
   }
 
   return (
@@ -100,13 +119,37 @@ export default function ModPage() {
         </div>
 
         <div className="mt-6 grid gap-4">
+          {!view && (
+            <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+              <h2 className="text-base font-semibold">入室（認証）</h2>
+              <p className="mt-2 text-sm text-neutral-300">招待リンクの token を使って入室してください（cookieに保存します）。</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <input
+                  className="w-full max-w-md rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+                  placeholder="token を貼り付け"
+                  value={enterToken}
+                  onChange={(e) => setEnterToken(e.target.value)}
+                />
+                <button
+                  className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+                  disabled={entering || enterToken.trim().length === 0}
+                  onClick={() => void enter(enterToken)}
+                  type="button"
+                >
+                  {entering ? "入室中..." : "入室"}
+                </button>
+              </div>
+              {enterError && <div className="mt-3 text-sm text-red-200">入室に失敗: {enterError}</div>}
+            </div>
+          )}
+
           <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-semibold">スポットライト</h2>
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70 disabled:opacity-60"
-                  disabled={sending}
+                  disabled={sending || !view}
                   onClick={() => setDraft([])}
                   type="button"
                 >
@@ -114,7 +157,7 @@ export default function ModPage() {
                 </button>
                 <button
                   className="rounded-md bg-emerald-500 px-4 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                  disabled={sending}
+                  disabled={sending || !view}
                   onClick={() => void send()}
                   type="button"
                 >
@@ -125,6 +168,9 @@ export default function ModPage() {
 
             <div className="mt-3 text-xs text-neutral-400">
               現在: {view?.spotlight?.ids?.length ?? 0}人 / 下書き: {draft.length}人（最大6）
+            </div>
+            <div className="mt-1 text-xs text-neutral-500">
+              spotlight: v{view?.spotlight?.version ?? "—"} / updatedBy {view?.spotlight?.updatedBy ?? "—"}
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -195,4 +241,3 @@ export default function ModPage() {
     </main>
   );
 }
-
