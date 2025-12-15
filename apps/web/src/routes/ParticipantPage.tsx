@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import BingoCard from "../components/BingoCard";
+import Alert from "../components/ui/Alert";
+import Badge from "../components/ui/Badge";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
+import WsStatusPill from "../components/ui/WsStatusPill";
 import { useLocalStorageString } from "../lib/useLocalStorage";
 import { useSessionSocket, type ParticipantSnapshot } from "../lib/useSessionSocket";
 
@@ -57,115 +63,136 @@ export default function ParticipantPage() {
   return (
     <main className="min-h-dvh bg-neutral-950 text-neutral-50">
       <div className="mx-auto max-w-3xl px-6 py-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">参加者</h1>
             <div className="mt-1 text-sm text-neutral-400">
               セッション: <span className="font-mono text-neutral-200">{code}</span>
             </div>
           </div>
-          <div className="text-xs text-neutral-400">
-            WS:{" "}
-            <span className={status === "connected" ? "text-emerald-300" : status === "offline" ? "text-red-200" : "text-amber-300"}>
-              {status}
-            </span>
-          </div>
+          <WsStatusPill status={status} />
         </div>
 
         {view?.sessionStatus === "ended" && (
-          <div className="mt-6 rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-sm text-amber-200">
-            このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+          <div className="mt-6">
+            <Alert variant="warning">
+              このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+            </Alert>
           </div>
         )}
 
         {!playerId && (
-          <div className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+          <Card className="mt-8">
             <h2 className="text-base font-semibold">表示名を入力</h2>
+            <p className="mt-2 text-sm text-neutral-300">会場で呼ばれたい名前を入力してください。</p>
             <div className="mt-3 flex flex-wrap gap-3">
-              <input
-                className="w-full max-w-sm rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm outline-none focus:border-emerald-600"
-                placeholder="例: らい"
-                value={joinName}
-                onChange={(e) => setJoinName(e.target.value)}
-              />
-              <button
-                className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
+              <Input placeholder="例: らい" value={joinName} onChange={(e) => setJoinName(e.target.value)} />
+              <Button
                 disabled={joining || joinName.trim().length === 0 || view?.sessionStatus === "ended"}
                 onClick={join}
-                type="button"
+                variant="primary"
               >
                 {joining ? "参加中..." : "参加する"}
-              </button>
+              </Button>
             </div>
-            {joinError && <div className="mt-3 text-sm text-red-200">参加に失敗: {joinError}</div>}
+            {joinError && (
+              <div className="mt-3">
+                <Alert variant="danger">参加に失敗: {joinError}</Alert>
+              </div>
+            )}
             <div className="mt-4 text-xs text-neutral-500">※ セッションが未初期化の場合は 404 になります（ローカルはトップで作成）。</div>
-          </div>
+          </Card>
         )}
 
         {playerId && (
           <div className="mt-8 grid gap-6">
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-neutral-200">
-                  あなた: <span className="font-semibold">{displayName || "（未設定）"}</span>
+            <Card>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs text-neutral-400">あなた</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <div className="text-lg font-semibold text-neutral-50">{displayName || "（未設定）"}</div>
+                    {view?.player?.progress?.isBingo && <Badge variant="success">BINGO</Badge>}
+                  </div>
                 </div>
-                <button
-                  className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70"
-                  onClick={resetIdentity}
-                  type="button"
-                >
+                <Button onClick={resetIdentity} size="sm" variant="secondary">
                   名前を変える（再参加）
-                </button>
+                </Button>
               </div>
 
-              <div className="mt-4 grid gap-2 text-sm text-neutral-200">
-                <div>
-                  直近:{" "}
-                  <span className="font-mono text-lg text-neutral-50">{view?.lastNumber ?? "—"}</span>{" "}
-                  <span className="text-xs text-neutral-400">/ draw {view?.drawCount ?? "—"}</span>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-3">
+                  <div className="text-xs text-neutral-500">直近</div>
+                  <div className="mt-1 font-mono text-2xl text-neutral-50">{view?.lastNumber ?? "—"}</div>
                 </div>
-                {view?.player?.progress && (
-                  <div className="text-xs text-neutral-400">
-                    reachLines: <span className="text-neutral-200">{view.player.progress.reachLines}</span> / bingoLines:{" "}
-                    <span className="text-neutral-200">{view.player.progress.bingoLines}</span> / minMissingToLine:{" "}
-                    <span className="text-neutral-200">{view.player.progress.minMissingToLine}</span>
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-3">
+                  <div className="text-xs text-neutral-500">draw</div>
+                  <div className="mt-1 font-mono text-2xl text-neutral-50">{view?.drawCount ?? "—"}</div>
+                </div>
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-3">
+                  <div className="text-xs text-neutral-500">会場</div>
+                  <div className="mt-1 text-sm text-neutral-200">
+                    reach <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span> / bingo{" "}
+                    <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
                   </div>
-                )}
+                </div>
+              </div>
+
+              {view?.player?.progress && (
+                <div className="mt-4 text-sm text-neutral-300">
+                  あなたの進捗:{" "}
+                  <span className="font-mono text-neutral-50">{view.player.progress.minMissingToLine}</span>手（最短） / reach{" "}
+                  <span className="font-mono text-neutral-50">{view.player.progress.reachLines}</span> / lines{" "}
+                  <span className="font-mono text-neutral-50">{view.player.progress.bingoLines}</span>
+                </div>
+              )}
+
+              <div className="mt-4">
+                <div className="text-xs text-neutral-500">直近の番号</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
+                    <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                      {n}
+                    </div>
+                  ))}
+                  {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+                </div>
               </div>
 
               {view && view.player === null && (
-                <div className="mt-6 rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 text-sm text-amber-200">
-                  参加情報が見つかりませんでした（playerId が無効の可能性があります）。「名前を変える（再参加）」を押してください。
+                <div className="mt-6">
+                  <Alert variant="warning">
+                    参加情報が見つかりませんでした（playerId が無効の可能性があります）。「名前を変える（再参加）」を押してください。
+                  </Alert>
                 </div>
               )}
+            </Card>
 
+            <Card>
+              <h2 className="text-base font-semibold">あなたのカード</h2>
               {view?.player?.card ? (
-                <div className="mt-6">
+                <div className="mt-4">
                   <BingoCard card={view.player.card} drawnNumbers={view.drawnNumbers} />
                 </div>
               ) : view && view.player === null ? null : (
-                <div className="mt-6 text-sm text-neutral-400">カードを読み込み中...</div>
+                <div className="mt-4 text-sm text-neutral-400">カードを読み込み中...</div>
               )}
-            </div>
+            </Card>
 
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+            <Card>
               <h2 className="text-base font-semibold">スポットライト</h2>
               <div className="mt-3 flex flex-wrap gap-2">
                 {view?.spotlight?.players?.length ? (
                   view.spotlight.players.map((p) => (
-                    <div
-                      key={p.id}
-                      className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-xs text-neutral-200"
-                      title={p.id}
-                    >
-                      {p.displayName}
+                    <div key={p.id} title={p.id}>
+                      <Badge>{p.displayName}</Badge>
                     </div>
                   ))
                 ) : (
                   <div className="text-sm text-neutral-400">（まだ選ばれていません）</div>
                 )}
               </div>
-            </div>
+            </Card>
           </div>
         )}
       </div>

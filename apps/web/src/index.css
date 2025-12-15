@@ -9,3 +9,17 @@ body {
   margin: 0;
 }
 
+@keyframes clover-pop {
+  0% {
+    transform: scale(1.07);
+    filter: drop-shadow(0 0 24px rgba(16, 185, 129, 0.15));
+  }
+  60% {
+    transform: scale(0.99);
+    filter: drop-shadow(0 0 40px rgba(16, 185, 129, 0.1));
+  }
+  100% {
+    transform: scale(1);
+    filter: none;
+  }
+}

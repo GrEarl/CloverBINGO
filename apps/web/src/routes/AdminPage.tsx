@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import Alert from "../components/ui/Alert";
+import Badge from "../components/ui/Badge";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
+import Kbd from "../components/ui/Kbd";
+import WsStatusPill from "../components/ui/WsStatusPill";
 import { useSessionSocket, type AdminSnapshot, type ReelStatus, type ServerEvent } from "../lib/useSessionSocket";
 
 type Digit = "ten" | "one";
@@ -65,6 +72,15 @@ export default function AdminPage() {
     if (one === "spinning") return "D (一 stop)";
     return "P (prepare)";
   }, [view]);
+
+  const tenReel = view?.pendingDraw?.reel.ten ?? "idle";
+  const oneReel = view?.pendingDraw?.reel.one ?? "idle";
+  const canOperate = Boolean(view && view.sessionStatus === "active");
+  const canPrepare = Boolean(canOperate && view?.drawState !== "spinning");
+  const canTenStart = Boolean(canOperate && tenReel === "idle");
+  const canTenStop = Boolean(canOperate && tenReel === "spinning");
+  const canOneStart = Boolean(canOperate && oneReel === "idle");
+  const canOneStop = Boolean(canOperate && oneReel === "spinning");
 
   async function prepare() {
     setError(null);
@@ -216,108 +232,122 @@ export default function AdminPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
             <div className="mt-1 text-sm text-neutral-400">
-              セッション: <span className="font-mono text-neutral-200">{code}</span> / WS:{" "}
-              <span
-                className={
-                  status === "connected" ? "text-emerald-300" : status === "offline" ? "text-red-200" : "text-amber-300"
-                }
-              >
-                {status}
-              </span>
+              セッション: <span className="font-mono text-neutral-200">{code}</span>
             </div>
-            <div className="mt-1 text-xs text-neutral-500">キー: P=prepare, W/A=十の位 start/stop, S/D=一の位 start/stop</div>
-            <div className="mt-1 text-xs text-neutral-500">
-              next: <span className="text-neutral-200">{nextHint}</span>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+              <div className="flex flex-wrap items-center gap-1">
+                <Kbd>P</Kbd> <span>prepare</span>
+              </div>
+              <span className="text-neutral-700">/</span>
+              <div className="flex flex-wrap items-center gap-1">
+                <Kbd>W</Kbd> <span>十 start</span> <Kbd>A</Kbd> <span>十 stop</span>
+              </div>
+              <span className="text-neutral-700">/</span>
+              <div className="flex flex-wrap items-center gap-1">
+                <Kbd>S</Kbd> <span>一 start</span> <Kbd>D</Kbd> <span>一 stop</span>
+              </div>
+            </div>
+            <div className="mt-2">
+              <Badge variant="warning">next: {nextHint}</Badge>
             </div>
           </div>
-          <div className="text-xs text-neutral-500">last: <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span></div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <WsStatusPill status={status} />
+            <Badge>last: {view?.lastNumber ?? "—"}</Badge>
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4">
           {!view && (
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+            <Card>
               <h2 className="text-base font-semibold">入室（認証）</h2>
               <p className="mt-2 text-sm text-neutral-300">
                 招待リンクの token を使って入室してください（cookieに保存します）。入室後は URL から token を外しても動きます。
               </p>
               <div className="mt-3 flex flex-wrap gap-3">
-                <input
-                  className="w-full max-w-md rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm outline-none focus:border-emerald-600"
-                  placeholder="token を貼り付け"
-                  value={enterToken}
-                  onChange={(e) => setEnterToken(e.target.value)}
-                />
-                <button
-                  className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400 disabled:opacity-60"
-                  disabled={entering || enterToken.trim().length === 0}
-                  onClick={() => void enter(enterToken)}
-                  type="button"
-                >
+                <Input placeholder="token を貼り付け" value={enterToken} onChange={(e) => setEnterToken(e.target.value)} />
+                <Button disabled={entering || enterToken.trim().length === 0} onClick={() => void enter(enterToken)} variant="primary">
                   {entering ? "入室中..." : "入室"}
-                </button>
+                </Button>
               </div>
-              {enterError && <div className="mt-3 text-sm text-red-200">入室に失敗: {enterError}</div>}
-            </div>
+              {enterError && (
+                <div className="mt-3">
+                  <Alert variant="danger">入室に失敗: {enterError}</Alert>
+                </div>
+              )}
+            </Card>
           )}
 
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
+          <Card>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-semibold">抽選操作</h2>
-              <div className="text-xs text-neutral-400">lastAction: {lastAction ?? "—"}</div>
+              <div className="flex items-center gap-2 text-xs text-neutral-400">
+                <span>lastAction:</span>
+                <span className="font-mono text-neutral-200">{lastAction ?? "—"}</span>
+              </div>
             </div>
+
+            {!audioEnabled && (
+              <div className="mt-4">
+                <Alert variant="warning" className="flex flex-wrap items-center justify-between gap-3">
+                  <div>音を出すには「音を有効化」を一度押してください（ブラウザの自動再生制限のため）。</div>
+                  <Button onClick={() => void enableAudio()} size="sm" variant="primary">
+                    音を有効化
+                  </Button>
+                </Alert>
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-400"
+              <Button
                 onClick={() => void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view || view.sessionStatus !== "active" || view.drawState === "spinning"}
-                type="button"
+                disabled={!canPrepare}
+                variant="primary"
               >
                 P / Prepare
-              </button>
-              <button
-                className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
+              </Button>
+              <Button
                 onClick={() => void reel("ten", "start").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view || view.sessionStatus !== "active"}
-                type="button"
+                disabled={!canTenStart}
+                variant="secondary"
               >
                 W / 十 start
-              </button>
-              <button
-                className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
+              </Button>
+              <Button
                 onClick={() => void reel("ten", "stop").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view || view.sessionStatus !== "active"}
-                type="button"
+                disabled={!canTenStop}
+                variant="secondary"
               >
                 A / 十 stop
-              </button>
-              <button
-                className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
+              </Button>
+              <Button
                 onClick={() => void reel("one", "start").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view || view.sessionStatus !== "active"}
-                type="button"
+                disabled={!canOneStart}
+                variant="secondary"
               >
                 S / 一 start
-              </button>
-              <button
-                className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:bg-neutral-950/70"
+              </Button>
+              <Button
                 onClick={() => void reel("one", "stop").catch((err) => setError(err instanceof Error ? err.message : "unknown error"))}
-                disabled={!view || view.sessionStatus !== "active"}
-                type="button"
+                disabled={!canOneStop}
+                variant="secondary"
               >
                 D / 一 stop
-              </button>
-              <button
-                className="rounded-md border border-red-800/60 bg-red-950/20 px-3 py-2 text-sm text-red-200 hover:bg-red-950/40 disabled:opacity-60"
+              </Button>
+              <Button
                 onClick={() => void endSession()}
-                disabled={!view || view.sessionStatus !== "active"}
-                type="button"
+                disabled={!canOperate}
+                variant="destructive"
               >
                 セッション終了
-              </button>
+              </Button>
             </div>
 
-            {error && <div className="mt-3 text-sm text-red-200">error: {error}</div>}
+            {error && (
+              <div className="mt-3">
+                <Alert variant="danger">error: {error}</Alert>
+              </div>
+            )}
 
             <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-neutral-400">
               <div>
@@ -334,15 +364,6 @@ export default function AdminPage() {
               <div>
                 audio: <span className={audioEnabled ? "text-emerald-200" : "text-amber-200"}>{audioEnabled ? "enabled" : "disabled"}</span>
               </div>
-              {!audioEnabled && (
-                <button
-                  className="rounded-md border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-xs text-neutral-200 hover:bg-neutral-950/70"
-                  onClick={() => void enableAudio()}
-                  type="button"
-                >
-                  音を有効化
-                </button>
-              )}
             </div>
 
             <div className="mt-6 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">
@@ -350,7 +371,7 @@ export default function AdminPage() {
               {view?.pendingDraw ? (
                 <div className="mt-2 grid gap-1 text-sm">
                   <div>
-                    次番号（Adminのみ）: <span className="font-mono text-lg">{view.pendingDraw.number}</span>
+                    次番号（Adminのみ）: <span className="font-mono text-2xl text-neutral-50">{view.pendingDraw.number}</span>
                   </div>
                   <div className="text-xs text-neutral-400">
                     impact: reachPlayers={view.pendingDraw.impact.reachPlayers}, bingoPlayers={view.pendingDraw.impact.bingoPlayers}
@@ -363,7 +384,7 @@ export default function AdminPage() {
                 <div className="mt-2 text-sm text-neutral-400">（未prepare）</div>
               )}
             </div>
-          </div>
+          </Card>
         </div>
       </div>
     </main>

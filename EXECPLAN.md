@@ -36,6 +36,10 @@
 - [x] (2025-12-15 03:50Z) Mod 画面に検索/ソート、参加者詳細（簡易カード）、最終更新者/時刻（相対）表示を実装した。
 - [x] (2025-12-15 03:50Z) 単体テスト（commitログ復元）を追加し、WS負荷確認（擬似接続）スクリプトを追加した。
 - [x] (2025-12-15 04:49Z) 仕様ズレ/運用リスク修正（`newBingoIds` の配信範囲、snapshot計算の最適化、WS再接続ジッター、`/api/dev/create-session` のローカル限定）。
+- [x] (2025-12-15 08:01Z) UI/UX 改善: 画面共通の UI プリミティブ（Button/Input/Card/Badge/Kbd 等）を追加し、見た目と操作性を統一した。
+- [x] (2025-12-15 08:01Z) Display: オーバーレイの自動非表示/フルスクリーン導線/リール停止時の視覚効果を改善した（遠距離視認性は維持）。
+- [x] (2025-12-15 08:01Z) Mod: 「選択」と「下書き追加」を分離し、誤操作を減らした（最大6人到達時のフィードバック追加）。
+- [x] (2025-12-15 08:01Z) Admin/Participant/Invite/Home: タイポグラフィ/余白/状態表示を統一し、アクセシビリティ（focus/disabled）を改善した。
 
 ## Surprises & Discoveries
 
@@ -44,6 +48,7 @@
 - `draw.committed` の `newBingoIds` が全roleに配信され得る実装になっていたため、Mod/Admin のみに限定した。
 - WebSocket 再接続が固定間隔だと瞬断/デプロイ後に同時再接続が起きやすいため、指数バックオフ + ジッターに変更した。
 - `vite build` は TypeScript の型エラーを検出しないため、`npx tsc -p apps/web/tsconfig.json --noEmit` を回して HomePage の型エラーを修正した。
+- React 19 + 本リポジトリの型設定では `JSX.Element` を直接参照できない箇所があったため、`ReactNode` を使うようにした。
 
 ## Decision Log
 
@@ -73,6 +78,9 @@
   Date/Author: 2025-12-15 / codex
 - Decision: WebSocket 再接続は指数バックオフ + ジッターで行う。
   Rationale: 瞬断/デプロイ後の同時再接続による負荷スパイクを避けるため。
+  Date/Author: 2025-12-15 / codex
+- Decision: Web UI は TailwindCSS + 軽量な自前 UI プリミティブで統一し、重い UI ライブラリ依存を増やさない。
+  Rationale: バンドル肥大を避けつつ、各ページの見た目/操作性を一貫させるため（会場運用での視認性・誤操作耐性を優先）。
   Date/Author: 2025-12-15 / codex
 
 ## Outcomes & Retrospective
@@ -156,6 +164,7 @@
 - 回線が揺れても復帰できる（再接続で snapshot 同期が成立する）。
 - 招待URLは GET で副作用を起こさない（入室はPOSTでcookie付与）。
 - end 後は全操作が無効化され、WSクライアントも「終了」を表示できる。
+- UI/UX: 会場表示は遠距離でも読める大きさ/コントラストを維持し、常時表示する情報（オーバーレイ）は最小限に抑える。
 
 ## Idempotence and Recovery
 
@@ -199,3 +208,4 @@
 - 2025-12-15 02:51Z: ユーザー要求が「フル要件実装」に拡大したため、目的/進捗/手順/受け入れ条件をフル要件版に更新し、以後このExecPlanで実装を進める。
 - 2025-12-15 03:50Z: D1/DO/WS の整合と Web UI（Invite/Admin/Mod/Display/Participant）を要件に追従させ、音響導線/統計表示/負荷スクリプト/テストを追加した。
 - 2025-12-15 04:49Z: `newBingoIds` の秘匿、snapshot配信の計算最適化、WS再接続ジッター、`/api/dev/create-session` のローカル限定、webの型チェック修正を行った。
+- 2025-12-15 08:01Z: UI/UX を見直し、共通 UI 部品化（Button/Input/Card 等）、Display のオーバーレイ自動非表示、Mod の誤操作低減（選択と下書き追加の分離）を反映した。
