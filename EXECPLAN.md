@@ -40,6 +40,8 @@
 - [x] (2025-12-15 08:01Z) Display: オーバーレイの自動非表示/フルスクリーン導線/リール停止時の視覚効果を改善した（遠距離視認性は維持）。
 - [x] (2025-12-15 08:01Z) Mod: 「選択」と「下書き追加」を分離し、誤操作を減らした（最大6人到達時のフィードバック追加）。
 - [x] (2025-12-15 08:01Z) Admin/Participant/Invite/Home: タイポグラフィ/余白/状態表示を統一し、アクセシビリティ（focus/disabled）を改善した。
+- [x] (2025-12-15 11:58Z) 仕様修正対応: `W/A/S/D` を「全桁GO」（十の位/一の位を同時に回す）に統一し、各桁ランダム時間で自動停止・`P`（prepare）なしではリール開始できないように、SessionDO/API/Admin UI/README を更新した。
+- [x] (2025-12-15 13:08Z) Admin 音響: 新SE/BGM仕様（prepareシーケンス/リール中7秒ループ/桁確定/ビンゴ/開放人数/複数ビンゴ演出 + BGM ducking）を実装した。
 
 ## Surprises & Discoveries
 
@@ -82,6 +84,12 @@
 - Decision: Web UI は TailwindCSS + 軽量な自前 UI プリミティブで統一し、重い UI ライブラリ依存を増やさない。
   Rationale: バンドル肥大を避けつつ、各ページの見た目/操作性を一貫させるため（会場運用での視認性・誤操作耐性を優先）。
   Date/Author: 2025-12-15 / codex
+- Decision: Admin の `W/A/S/D` は「全桁GO」に統一し、停止は各桁がランダム時間で自動停止（Admin は停止操作しない）。また `P`（prepare）なしでは GO できない。
+  Rationale: 仕様修正に追従し、運用上「押すキーが多段にならない」「停止タイミングをAdminが気にしない」状態にして誤操作を減らすため。
+  Date/Author: 2025-12-15 / codex
+- Decision: Admin 音響は（当面）WebAudioではなく、`HTMLAudioElement` ベースで BGM/SE/ducking/7秒区間ループを実装する。
+  Rationale: 依存追加なしで実装でき、ブラウザ互換性（デコード/自動再生制限）を既存の「音を有効化」導線に揃えやすい。7秒区間ループはタイマーで制御する。
+  Date/Author: 2025-12-15 / codex
 
 ## Outcomes & Retrospective
 
@@ -89,7 +97,19 @@
 
 ## Context and Orientation
 
-現状は npm workspaces のモノレポで、Worker / Web / 共通ロジック（core）が揃っている状態です。音源（スロット系SE/BGM）は `audio_ogg/` に同梱されています。
+現状は npm workspaces のモノレポで、Worker / Web / 共通ロジック（core）が揃っている状態です。音源（スロット系SE/BGM）は `audio_ogg/` に同梱されています（`audio_ogg/soundeffect/*.ogg` と `audio_ogg/bgm/*.ogg`）。
+
+Admin の音響仕様（このExecPlanでの合意）:
+
+- BGM: `OstCredits.ogg` / `OstDemoTrailer.ogg` / `OstReleaseTrailer.ogg` のいずれかを常時再生（ループ）。SE 再生中のみ BGM 音量を 50% にする（ducking）。
+- SE（トリガーとファイル）:
+  - prepare（`P` で「次の番号を準備」）: `SoundCoinDeposit.ogg` を3回 → `SoundSlotMachineStartupJingle.ogg`
+  - リール中（spinning中）: `SoundSlotMachineFanfare.ogg` を「0〜7秒」の区間ループ再生
+  - 桁確定（各桁の stop。順序はランダム）: `SoundSlotMachineScored.ogg`
+  - 桁確定（この draw で新規BINGOが出ることが確定している場合）: `SoundSlotMachineScoredWithJackpot.ogg`
+  - リール結果の番号で「何人マス解放できたか」を表示する時: `SoundSlotMachineSpinWin.ogg`
+  - ビンゴ者が出た時（新規BINGO発生）: `SoundSlotMachineJackpot.ogg`
+  - 複数ビンゴ者が出た時、BINGO者のエントリーネームを順に表示し終わった時: `SoundSlotMachineLongStreakEndAnticipation.ogg`
 
 主要なコードの場所:
 
@@ -158,13 +178,14 @@
 受け入れ条件（フル要件）:
 
 - 参加登録→カード配布→抽選反映→ビンゴ到達判定が安定して動く（最大200人規模を想定）。
-- Admin の `P`（prepare）→ `W/A/S/D`（go）で、会場モニター2枚（ten/one）が「回転→停止→確定」で期待通りに動く。
+- Admin の `P`（prepare）→ `W/A/S/D`（GO）で、会場モニター2枚（ten/one）が「回転→（各桁がランダム時間で自動停止）→確定」で期待通りに動く（GO は prepare 済みのみ可）。
 - prepare結果（次番号/プレビュー統計）は Admin だけが閲覧でき、Mod/参加者/会場表示には漏れない。
 - Mod が参加者進捗を俯瞰でき、スポットライト最大6人を会場表示へ反映できる（複数Mod同時接続でLWWが機能する）。
 - 回線が揺れても復帰できる（再接続で snapshot 同期が成立する）。
 - 招待URLは GET で副作用を起こさない（入室はPOSTでcookie付与）。
 - end 後は全操作が無効化され、WSクライアントも「終了」を表示できる。
 - UI/UX: 会場表示は遠距離でも読める大きさ/コントラストを維持し、常時表示する情報（オーバーレイ）は最小限に抑える。
+- Admin 音響: BGM が常時ループし、SE 再生中のみ BGM 音量が 50% になる。SE は上記のトリガーに従って鳴る（prepareシーケンス、spinning中の7秒ループ、桁stop、commit後の開放人数表示、新規BINGO、複数BINGOの名前表示完了）。
 
 ## Idempotence and Recovery
 
@@ -194,7 +215,7 @@
   - `POST /api/participant/join?code=<sessionCode>`（displayName→playerId+card）
 - Admin:
   - `POST /api/admin/prepare?code=<sessionCode>`
-  - `POST /api/admin/reel?code=<sessionCode>`（digit/action）
+  - `POST /api/admin/reel?code=<sessionCode>`（action=`go`。十の位/一の位を同時に回転開始し、各桁はサーバ側でランダム時間後に自動停止→両方停止で commit）
   - `POST /api/admin/end?code=<sessionCode>`
 - Mod:
   - `POST /api/mod/spotlight?code=<sessionCode>`（spotlight ids + updatedBy）
@@ -209,3 +230,6 @@
 - 2025-12-15 03:50Z: D1/DO/WS の整合と Web UI（Invite/Admin/Mod/Display/Participant）を要件に追従させ、音響導線/統計表示/負荷スクリプト/テストを追加した。
 - 2025-12-15 04:49Z: `newBingoIds` の秘匿、snapshot配信の計算最適化、WS再接続ジッター、`/api/dev/create-session` のローカル限定、webの型チェック修正を行った。
 - 2025-12-15 08:01Z: UI/UX を見直し、共通 UI 部品化（Button/Input/Card 等）、Display のオーバーレイ自動非表示、Mod の誤操作低減（選択と下書き追加の分離）を反映した。
+- 2025-12-15 11:46Z: 仕様修正（`W/A/S/D`=全桁GO、各桁ランダム自動停止、prepare必須）に合わせて、Progress/Decision/Interfaces/Acceptance を更新した。
+- 2025-12-15 11:58Z: 上記仕様修正を実装に反映し、Admin 操作を `P` → `W/A/S/D`（GO）に簡略化、停止はサーバ側の自動停止（各桁ランダム）へ変更した。
+- 2025-12-15 12:47Z: 音響（SE/BGM）の具体仕様（ファイル名/トリガー/ducking/7秒ループ/複数BINGO演出）を ExecPlan の Context/Acceptance/Decision に追記した。

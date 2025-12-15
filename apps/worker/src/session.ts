@@ -82,6 +82,17 @@ function isoNow(): string {
   return new Date().toISOString();
 }
 
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomIntInclusive(min: number, max: number): number {
+  const lo = Math.ceil(Math.min(min, max));
+  const hi = Math.floor(Math.max(min, max));
+  if (hi <= lo) return lo;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -614,52 +625,77 @@ export class SessionDurableObject {
       return textResponse("invalid json", { status: 400 });
     }
 
-    const digit = (body as { digit?: unknown }).digit;
     const action = (body as { action?: unknown }).action;
-    const isDigit = digit === "ten" || digit === "one";
-    const isAction = action === "start" || action === "stop";
-    if (!isDigit || !isAction) return textResponse("digit/action required", { status: 400 });
+    if (action !== "go") return textResponse("action required", { status: 400 });
 
-    if (!this.pendingDraw) {
-      if (action !== "start") return textResponse("no pending draw; press start first", { status: 409 });
-      const ensured = await this.ensurePendingDraw();
-      if (ensured instanceof Response) return ensured;
-    }
+    if (!this.pendingDraw) return textResponse("no pending draw; press P (prepare) first", { status: 409 });
+    const pending = this.pendingDraw;
 
-    const pending = this.pendingDraw!;
-    if (action === "start") {
-      if (pending.reel[digit] !== "idle") return jsonResponse({ ok: true, pendingDraw: pending });
-      pending.reel[digit] = "spinning";
-      pending.state = "spinning";
-      pending.stoppedDigits[digit] = null;
+    if (pending.state !== "prepared") return textResponse("not prepared", { status: 409 });
+    if (pending.reel.ten !== "idle" || pending.reel.one !== "idle") return textResponse("reel not idle", { status: 409 });
 
-      this.broadcastEvent(
-        (a) => a?.role === "display",
-        { type: "draw.spin", action: "start", digit, at: nowMs() },
-      );
-      this.touch();
-      this.broadcastSnapshots();
-      return jsonResponse({ ok: true, pendingDraw: pending });
-    }
+    pending.state = "spinning";
+    pending.reel.ten = "spinning";
+    pending.reel.one = "spinning";
+    pending.stoppedDigits.ten = null;
+    pending.stoppedDigits.one = null;
 
-    // stop
-    if (pending.reel[digit] !== "spinning") return textResponse("reel not spinning", { status: 409 });
-    const targetDigit = digitsOf(pending.number)[digit];
-    pending.reel[digit] = "stopped";
-    pending.stoppedDigits[digit] = targetDigit;
+    const startedAt = nowMs();
+    this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "ten", at: startedAt });
+    this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
 
-    this.broadcastEvent(
-      (a) => a?.role === "display",
-      { type: "draw.spin", action: "stop", digit, at: nowMs(), digitValue: targetDigit },
-    );
+    const stopTenAfterMs = randomIntInclusive(850, 1700);
+    const stopOneAfterMs = randomIntInclusive(850, 1700);
+
+    const stopSequence = (async () => {
+      const current = pending;
+      const number = current.number;
+      await Promise.all([
+        (async () => {
+          await sleepMs(stopTenAfterMs);
+          if (this.pendingDraw !== current) return;
+          if (current.reel.ten !== "spinning") return;
+          const digitValue = digitsOf(number).ten;
+          current.reel.ten = "stopped";
+          current.stoppedDigits.ten = digitValue;
+          this.broadcastEvent((a) => a?.role === "display", {
+            type: "draw.spin",
+            action: "stop",
+            digit: "ten",
+            at: nowMs(),
+            digitValue,
+          });
+          this.touch();
+          this.broadcastSnapshots();
+        })(),
+        (async () => {
+          await sleepMs(stopOneAfterMs);
+          if (this.pendingDraw !== current) return;
+          if (current.reel.one !== "spinning") return;
+          const digitValue = digitsOf(number).one;
+          current.reel.one = "stopped";
+          current.stoppedDigits.one = digitValue;
+          this.broadcastEvent((a) => a?.role === "display", {
+            type: "draw.spin",
+            action: "stop",
+            digit: "one",
+            at: nowMs(),
+            digitValue,
+          });
+          this.touch();
+          this.broadcastSnapshots();
+        })(),
+      ]);
+
+      if (this.pendingDraw !== current) return;
+      if (current.reel.ten !== "stopped" || current.reel.one !== "stopped") return;
+      await this.confirmPendingDraw();
+    })();
+
+    this.state.waitUntil(stopSequence);
+
     this.touch();
     this.broadcastSnapshots();
-
-    if (pending.reel.ten === "stopped" && pending.reel.one === "stopped") {
-      await this.confirmPendingDraw();
-      return jsonResponse({ ok: true, confirmed: true });
-    }
-
     return jsonResponse({ ok: true, pendingDraw: pending });
   }
 
