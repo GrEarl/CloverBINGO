@@ -48,6 +48,7 @@
 - [x] (2025-12-15 14:44Z) 文字コード統一: リポジトリの主要テキストファイルが UTF-8 として妥当であることを検証し、`.editorconfig` で `charset=utf-8` を明示した。
 - [x] (2025-12-16 09:43Z) P0修正: Web の `BingoCard` が core の `BingoCard`（2次元配列）と一致するように描画/型を修正し、`variant/showHeaders` の既存呼び出しと整合させた。
 - [x] (2025-12-16 09:51Z) ローカル起動の安定化: `npm -w apps/worker run migrate:local` が Windows でも動くように修正し、`npm run dev` だけで D1 マイグレーションが適用されるようにした。
+- [x] (2025-12-16 10:30Z) UI事故修正: Tailwind のカスタム色（`pit-*`）がCSSに生成されず黒地に黒文字になっていたため、Participant/Display を既存の neutral 系 UI に戻して視認性を回復した。
 
 ## Surprises & Discoveries
 
@@ -58,6 +59,7 @@
 - `vite build` は TypeScript の型エラーを検出しないため、`npx tsc -p apps/web/tsconfig.json --noEmit` を回して HomePage の型エラーを修正した。
 - React 19 + 本リポジトリの型設定では `JSX.Element` を直接参照できない箇所があったため、`ReactNode` を使うようにした。
 - `wrangler d1 migrations apply` は `--yes` を受け付けず確認プロンプトが出るため、Windows の npm scripts（cmd.exe）でも動くように `echo y |` で非対話化する必要があった。
+- Tailwind v4 では `tailwind.config.js` が自動適用されない構成があり、`apps/web/dist/assets/*.css` に `pit-` 系ユーティリティが生成されない状態になり得た（JSには `bg-pit-*` が残るため、結果として黒地に黒文字になる）。
 
 ## Decision Log
 
@@ -115,6 +117,9 @@
 - Decision: リポジトリのテキストファイルは UTF-8 に統一し、`.editorconfig` で `charset=utf-8` を明示する。
   Rationale: OS/エディタ/ターミナル差で日本語が文字化けしないようにし、レビュー/運用手順の再現性を上げるため。
   Date/Author: 2025-12-15 / codex
+- Decision: Participant/Display の `pit-*` テーマ用クラスは撤回し、既存の neutral 系 UI（Tailwind標準色 + 自前UIプリミティブ）へ戻す。
+  Rationale: `pit-*` がCSSに生成されない状態で視認性が壊れたため。イベント運用では「確実に読める」ことを最優先し、既存のUI設計へ統一してリスクを下げる。
+  Date/Author: 2025-12-16 / codex
 
 ## Outcomes & Retrospective
 
@@ -265,3 +270,5 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-15 14:44Z: 文字コードの要件に合わせ、UTF-8の妥当性チェックと `.editorconfig` を追加した。
 - 2025-12-16 09:43Z: レビュー指摘（BingoCard が core 型と不整合）に対応し、Web 側のカード描画コンポーネントを修正した。
 - 2025-12-16 09:51Z: `migrate:local` が Windows（cmd.exe）で `printf` 不在により失敗する問題を修正し、Worker の dev 起動時に D1 マイグレーションを自動適用するようにした。
+- 2025-12-16 10:25Z: UIが黒地に黒文字になる事故を調査し、`pit-*` ユーティリティがCSSに生成されていないことを確認した。運用の安定性を優先して Participant/Display を neutral 系 UI へ戻す方針を追記した。
+- 2025-12-16 10:30Z: Participant/Display の `pit-*` 依存を撤去し、既存の neutral 系 UI（日本語・共通UIプリミティブ）へ復帰させて視認性を回復した。

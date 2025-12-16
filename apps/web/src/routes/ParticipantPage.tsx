@@ -10,7 +10,6 @@ import Input from "../components/ui/Input";
 import WsStatusPill from "../components/ui/WsStatusPill";
 import { useLocalStorageString } from "../lib/useLocalStorage";
 import { useSessionSocket, type ParticipantSnapshot } from "../lib/useSessionSocket";
-import { cn } from "../lib/cn";
 
 export default function ParticipantPage() {
   const params = useParams();
@@ -56,134 +55,107 @@ export default function ParticipantPage() {
   }
 
   function resetIdentity() {
-    if (confirm("Reset ID? This cannot be undone.")) {
-        setPlayerId("");
-        setDisplayName("");
-        setJoinName("");
-    }
+    setPlayerId("");
+    setDisplayName("");
+    setJoinName("");
   }
 
   return (
-    <main className="min-h-dvh bg-pit-bg font-mono text-pit-text-main selection:bg-pit-primary selection:text-pit-bg">
-      <div className="mx-auto max-w-md p-4">
-        {/* Device Header */}
-        <div className="mb-6 flex items-center justify-between border-b-2 border-pit-border pb-2">
+    <main className="min-h-dvh bg-neutral-950 text-neutral-50">
+      <div className="mx-auto max-w-md px-4 py-4 sm:px-6 sm:py-8">
+        <div className="flex items-start justify-between gap-3">
           <div>
             {!playerId ? (
-              <h1 className="text-xl font-black uppercase tracking-widest text-pit-primary">Login</h1>
+              <h1 className="text-lg font-semibold tracking-tight">参加者</h1>
             ) : (
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                   <div className="text-lg font-bold text-pit-text-main">{displayName || "UNKNOWN"}</div>
-                   {view?.player?.progress?.isBingo && <Badge variant="success" className="animate-pulse shadow-glow">WINNER</Badge>}
-                </div>
-                <div className="text-[0.6rem] uppercase text-pit-text-muted">ID: {playerId.slice(0, 8)}...</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-lg font-semibold text-neutral-50">{displayName || "（未設定）"}</div>
+                {view?.player?.progress?.isBingo && <Badge variant="success">BINGO</Badge>}
               </div>
             )}
+            <div className="mt-1 text-xs text-neutral-400">
+              セッション: <span className="font-mono text-neutral-200">{code}</span>
+            </div>
           </div>
-          <div className="flex flex-col items-end gap-1">
-             <div className="flex items-center gap-1 text-[0.6rem] text-pit-text-muted uppercase">
-               <span>Signal:</span>
-               <WsStatusPill status={status} />
-             </div>
-             <div className="text-[0.6rem] text-pit-text-dim">Code: <span className="font-bold text-pit-primary">{code}</span></div>
-          </div>
+          <WsStatusPill status={status} />
         </div>
 
         {view?.sessionStatus === "ended" && (
-          <div className="mb-6 border-2 border-pit-danger bg-pit-danger/10 p-4 text-center">
-             <div className="text-lg font-bold text-pit-danger uppercase tracking-widest animate-pulse">Session Terminated</div>
-             {view.endedAt && <div className="mt-1 text-xs text-pit-danger/70">{view.endedAt}</div>}
+          <div className="mt-6">
+            <Alert variant="warning">
+              このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+            </Alert>
           </div>
         )}
 
         {!playerId && (
-          <div className="rounded-xl border-2 border-pit-border bg-pit-surface p-6 shadow-xl">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-pit-text-muted mb-4">Identity Registration</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-pit-text-dim block mb-1">Display Name</label>
-                <input 
-                  className="w-full rounded-none border-b-2 border-pit-text-muted bg-pit-bg px-3 py-2 text-pit-text-main placeholder-pit-text-muted/50 focus:border-pit-primary focus:outline-none"
-                  placeholder="ENTER NAME..." 
-                  value={joinName} 
-                  onChange={(e) => setJoinName(e.target.value)} 
-                />
-              </div>
-              <button
+          <Card className="mt-4 p-4">
+            <h2 className="text-base font-semibold">表示名を入力</h2>
+            <p className="mt-2 text-sm text-neutral-300">会場で呼ばれたい名前を入力してください。</p>
+            <div className="mt-3 flex flex-wrap gap-3">
+              <Input placeholder="例: らい" value={joinName} onChange={(e) => setJoinName(e.target.value)} />
+              <Button
                 disabled={joining || joinName.trim().length === 0 || view?.sessionStatus === "ended"}
                 onClick={join}
-                className="w-full rounded-sm bg-pit-primary px-4 py-3 text-sm font-bold text-pit-bg uppercase tracking-widest hover:bg-pit-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                variant="primary"
               >
-                {joining ? "Processing..." : "Confirm Identity"}
-              </button>
+                {joining ? "参加中..." : "参加する"}
+              </Button>
             </div>
             {joinError && (
-              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-2 text-xs text-pit-danger">
-                ERROR: {joinError}
+              <div className="mt-3">
+                <Alert variant="danger">参加に失敗: {joinError}</Alert>
               </div>
             )}
-             <div className="mt-4 text-[0.6rem] text-pit-text-muted text-center">
-                WARNING: Unauthorized access is prohibited.
-            </div>
-          </div>
+            <div className="mt-4 text-xs text-neutral-500">※ セッションが未初期化の場合は 404 になります（ローカルはトップで作成）。</div>
+          </Card>
         )}
 
         {playerId && (
-          <div className="grid gap-6">
+          <div className="mt-4 grid gap-4">
             {view && view.player === null && (
-              <div className="border border-pit-primary bg-pit-primary/10 p-4 text-sm text-pit-primary">
-                Identity Mismatch. Please re-register.
-              </div>
+              <Alert variant="warning">
+                参加情報が見つかりませんでした（playerId が無効の可能性があります）。「名前を変える（再参加）」を押してください。
+              </Alert>
             )}
 
-            <div className="rounded-xl border-none bg-transparent">
+            <Card className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-neutral-200">ビンゴカード</h2>
+                <Button onClick={resetIdentity} size="sm" variant="secondary">
+                  名前を変える（再参加）
+                </Button>
+              </div>
+
               {view?.player?.card ? (
-                <div className="transform transition-all">
+                <div className="mt-3">
                   <BingoCard card={view.player.card} drawnNumbers={view.drawnNumbers} />
                 </div>
               ) : view && view.player === null ? null : (
-                <div className="flex h-64 items-center justify-center border-2 border-dashed border-pit-border text-sm text-pit-text-muted animate-pulse">
-                  Acquiring Ticket...
-                </div>
+                <div className="mt-3 text-sm text-neutral-400">カードを読み込み中...</div>
               )}
 
-              {/* Stats Bar */}
-              <div className="mt-4 grid grid-cols-2 gap-4">
-                  <div className="rounded-sm border border-pit-border bg-pit-surface p-2 text-center">
-                      <div className="text-[0.6rem] uppercase text-pit-text-muted">Last Draw</div>
-                      <div className="text-2xl font-black text-pit-primary">{view?.lastNumber ?? "—"}</div>
-                  </div>
-                   <div className="rounded-sm border border-pit-border bg-pit-surface p-2 text-center">
-                      <div className="text-[0.6rem] uppercase text-pit-text-muted">Progress</div>
-                      <div className="text-2xl font-black text-pit-text-main">{view?.drawCount ?? "—"}<span className="text-sm text-pit-text-muted">/75</span></div>
-                  </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400">
+                <div>
+                  直近 <span className="font-mono text-neutral-100">{view?.lastNumber ?? "—"}</span>
+                </div>
+                <div>
+                  draw <span className="font-mono text-neutral-100">{view?.drawCount ?? "—"}</span>/75
+                </div>
               </div>
 
-              {/* History Log */}
-              <div className="mt-4">
-                 <details className="group">
-                    <summary className="cursor-pointer list-none rounded-sm border border-pit-border bg-pit-surface px-4 py-2 text-xs font-bold uppercase tracking-wider text-pit-text-muted hover:bg-pit-border transition-colors flex justify-between items-center">
-                        <span>View Draw Log</span>
-                        <span className="group-open:rotate-180 transition-transform">▼</span>
-                    </summary>
-                    <div className="mt-2 flex flex-wrap gap-2 p-2 border border-pit-border bg-pit-bg/50">
-                      {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
-                        <div key={idx} className="flex h-8 w-8 items-center justify-center rounded-sm bg-pit-surface border border-pit-border text-xs font-bold text-pit-text-dim">
-                          {n}
-                        </div>
-                      ))}
-                      {!view?.lastNumbers?.length && <div className="text-xs text-pit-text-muted">NO DATA</div>}
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs text-neutral-400">直近の番号</summary>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
+                    <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                      {n}
                     </div>
-                 </details>
-              </div>
-
-               <div className="mt-8 text-center">
-                <button onClick={resetIdentity} className="text-[0.6rem] uppercase text-pit-text-muted hover:text-pit-danger transition-colors underline decoration-dashed">
-                  Reset Terminal Identity
-                </button>
-              </div>
-            </div>
+                  ))}
+                  {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+                </div>
+              </details>
+            </Card>
           </div>
         )}
       </div>
