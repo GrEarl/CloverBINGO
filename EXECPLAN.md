@@ -49,6 +49,7 @@
 - [x] (2025-12-16 09:43Z) P0修正: Web の `BingoCard` が core の `BingoCard`（2次元配列）と一致するように描画/型を修正し、`variant/showHeaders` の既存呼び出しと整合させた。
 - [x] (2025-12-16 09:51Z) ローカル起動の安定化: `npm -w apps/worker run migrate:local` が Windows でも動くように修正し、`npm run dev` だけで D1 マイグレーションが適用されるようにした。
 - [x] (2025-12-16 10:30Z) UI事故修正: Tailwind のカスタム色（`pit-*`）がCSSに生成されず黒地に黒文字になっていたため、Participant/Display を既存の neutral 系 UI に戻して視認性を回復した。
+- [x] (2025-12-16 11:20Z) 音響/演出調整: BGM を3曲固定でループ再生し、SE音量を最大にする。prepare のコイン音を1回にし、リール停止時間のレンジを拡大した。
 
 ## Surprises & Discoveries
 
@@ -120,6 +121,9 @@
 - Decision: Participant/Display の `pit-*` テーマ用クラスは撤回し、既存の neutral 系 UI（Tailwind標準色 + 自前UIプリミティブ）へ戻す。
   Rationale: `pit-*` がCSSに生成されない状態で視認性が壊れたため。イベント運用では「確実に読める」ことを最優先し、既存のUI設計へ統一してリスクを下げる。
   Date/Author: 2025-12-16 / codex
+- Decision: Admin 音響は「BGM 3曲固定ループ + SE最大音量 + prepareコイン1回」に変更し、リール停止のランダム時間レンジを拡大する。
+  Rationale: 会場の演出要件に合わせ、BGMの変化量とSEの聞き取りやすさ、停止タイミングのランダム性（演出幅）を増やすため。
+  Date/Author: 2025-12-16 / codex
 
 ## Outcomes & Retrospective
 
@@ -131,9 +135,10 @@
 
 Admin の音響仕様（このExecPlanでの合意）:
 
-- BGM: `OstCredits.ogg` / `OstDemoTrailer.ogg` / `OstReleaseTrailer.ogg` のいずれかを常時再生（ループ）。SE 再生中のみ BGM 音量を 50% にする（ducking）。
+- BGM: `OstCredits.ogg` → `OstDemoTrailer.ogg` → `OstReleaseTrailer.ogg` の順で連続再生し、終端まで行ったら先頭に戻ってループする。SE 再生中のみ BGM 音量を 50% にする（ducking）。
 - SE（トリガーとファイル）:
-  - prepare（`P` で「次の番号を準備」）: `SoundCoinDeposit.ogg` を3回 → `SoundSlotMachineStartupJingle.ogg`
+  - 音量: すべて最大（`volume=1.0`）
+  - prepare（`P` で「次の番号を準備」）: `SoundCoinDeposit.ogg` を1回 → `SoundSlotMachineStartupJingle.ogg`
   - リール中（spinning中）: `SoundSlotMachineFanfare.ogg` を「0〜7秒」の区間ループ再生
   - 桁確定（各桁の stop。順序はランダム）: `SoundSlotMachineScored.ogg`
   - 桁確定（この draw で新規BINGOが出ることが確定している場合）: `SoundSlotMachineScoredWithJackpot.ogg`
@@ -272,3 +277,5 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-16 09:51Z: `migrate:local` が Windows（cmd.exe）で `printf` 不在により失敗する問題を修正し、Worker の dev 起動時に D1 マイグレーションを自動適用するようにした。
 - 2025-12-16 10:25Z: UIが黒地に黒文字になる事故を調査し、`pit-*` ユーティリティがCSSに生成されていないことを確認した。運用の安定性を優先して Participant/Display を neutral 系 UI へ戻す方針を追記した。
 - 2025-12-16 10:30Z: Participant/Display の `pit-*` 依存を撤去し、既存の neutral 系 UI（日本語・共通UIプリミティブ）へ復帰させて視認性を回復した。
+- 2025-12-16 11:12Z: 音響と演出（BGM3曲ループ、SE最大、prepareコイン1回、停止時間レンジ拡大）の方針変更を反映するため、仕様を更新した。
+- 2025-12-16 11:20Z: `apps/web` の音響実装と `apps/worker` の停止時間レンジを更新し、型チェック/ビルド/テストで成立を確認した。

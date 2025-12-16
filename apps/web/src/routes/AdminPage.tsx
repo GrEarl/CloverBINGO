@@ -24,7 +24,9 @@ type BgmTrackFile = (typeof BGM_TRACKS)[number]["file"];
 
 type AudioRig = {
   bgm: HTMLAudioElement;
-  bgmTrack: BgmTrackFile;
+  bgmPlaylist: readonly BgmTrackFile[];
+  bgmIndex: number;
+  bgmOnEnded: (() => void) | null;
   bgmBaseVolume: number;
   duckCount: number;
   fanfareLoopTimer: number | null;
@@ -57,11 +59,6 @@ type BingoAnnounce = {
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));
-}
-
-function safeBgmTrack(input: string): BgmTrackFile {
-  const found = BGM_TRACKS.find((t) => t.file === input)?.file;
-  return found ?? BGM_TRACKS[1].file;
 }
 
 function safeStop(audio: HTMLAudioElement): void {
@@ -174,10 +171,8 @@ export default function AdminPage() {
   const [enterError, setEnterError] = useState<string | null>(null);
   const [enterToken, setEnterToken] = useState(inviteToken);
 
-  const [bgmTrack, setBgmTrack] = useLocalStorageString("cloverbingo:admin:bgmTrack", BGM_TRACKS[1].file);
   const [bgmVolume, setBgmVolume] = useLocalStorageString("cloverbingo:admin:bgmVolume", "0.35");
   const bgmVolumeValue = useMemo(() => clamp01(Number.parseFloat(bgmVolume)), [bgmVolume]);
-  const bgmTrackFile = useMemo(() => safeBgmTrack(bgmTrack), [bgmTrack]);
 
   const [audioEnabled, setAudioEnabled] = useState(false);
   const audioRef = useRef<AudioRig | null>(null);
@@ -369,25 +364,6 @@ export default function AdminPage() {
     if (!audioEnabled) return;
     const aud = audioRef.current;
     if (!aud) return;
-    if (aud.bgmTrack === bgmTrackFile) return;
-    aud.bgmTrack = bgmTrackFile;
-    try {
-      aud.bgm.pause();
-    } catch {
-      // ignore
-    }
-    aud.bgm.src = `/bgm/${bgmTrackFile}`;
-    aud.bgm.loop = true;
-    syncBgmVolume(aud);
-    void aud.bgm.play().catch(() => {
-      // ignore
-    });
-  }, [audioEnabled, bgmTrackFile]);
-
-  useEffect(() => {
-    if (!audioEnabled) return;
-    const aud = audioRef.current;
-    if (!aud) return;
     const ev = lastEvent as ServerEvent | null;
     if (!isDrawPreparedEvent(ev)) return;
     if (prevPreparedAtRef.current === ev.preparedAt) return;
@@ -398,7 +374,7 @@ export default function AdminPage() {
       const seqId = aud.prepareSeqId;
       duckStart(aud);
       try {
-        for (let i = 0; i < 3; i += 1) {
+        for (let i = 0; i < 1; i += 1) {
           if (audioRef.current !== aud) return;
           if (aud.prepareSeqId !== seqId) return;
           await playToEnd(aud.sfx.coinDeposit);
@@ -494,6 +470,11 @@ export default function AdminPage() {
       const aud = audioRef.current;
       if (!aud) return;
       stopFanfare(aud);
+      if (aud.bgmOnEnded) {
+        aud.bgm.removeEventListener("ended", aud.bgmOnEnded);
+        aud.bgm.removeEventListener("error", aud.bgmOnEnded);
+        aud.bgmOnEnded = null;
+      }
       safeStop(aud.bgm);
       for (const sfx of Object.values(aud.sfx)) safeStop(sfx);
       audioRef.current = null;
@@ -503,12 +484,15 @@ export default function AdminPage() {
   async function enableAudio() {
     setError(null);
     try {
-      const bgm = new Audio(`/bgm/${bgmTrackFile}`);
-      bgm.loop = true;
+      const playlist = BGM_TRACKS.map((t) => t.file);
+      const bgm = new Audio(`/bgm/${playlist[0]}`);
+      bgm.loop = false;
 
       const rig: AudioRig = {
         bgm,
-        bgmTrack: bgmTrackFile,
+        bgmPlaylist: playlist,
+        bgmIndex: 0,
+        bgmOnEnded: null,
         bgmBaseVolume: bgmVolumeValue,
         duckCount: 0,
         fanfareLoopTimer: null,
@@ -528,12 +512,25 @@ export default function AdminPage() {
 
       rig.sfx.coinDeposit.volume = 1.0;
       rig.sfx.startupJingle.volume = 1.0;
-      rig.sfx.fanfare.volume = 0.95;
+      rig.sfx.fanfare.volume = 1.0;
       rig.sfx.scored.volume = 1.0;
       rig.sfx.scoredWithJackpot.volume = 1.0;
-      rig.sfx.spinWin.volume = 0.95;
+      rig.sfx.spinWin.volume = 1.0;
       rig.sfx.jackpot.volume = 1.0;
       rig.sfx.longStreakEnd.volume = 1.0;
+
+      rig.bgmOnEnded = () => {
+        if (audioRef.current !== rig) return;
+        rig.bgmIndex = (rig.bgmIndex + 1) % rig.bgmPlaylist.length;
+        rig.bgm.src = `/bgm/${rig.bgmPlaylist[rig.bgmIndex]}`;
+        rig.bgm.loop = false;
+        syncBgmVolume(rig);
+        void rig.bgm.play().catch(() => {
+          // ignore
+        });
+      };
+      rig.bgm.addEventListener("ended", rig.bgmOnEnded);
+      rig.bgm.addEventListener("error", rig.bgmOnEnded);
 
       audioRef.current = rig;
       setAudioEnabled(true);
@@ -632,17 +629,7 @@ export default function AdminPage() {
               <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3">
                 <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-300">
                   <div className="text-neutral-500">BGM</div>
-                  <select
-                    className="rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-xs text-neutral-200"
-                    value={bgmTrackFile}
-                    onChange={(e) => setBgmTrack(e.target.value)}
-                  >
-                    {BGM_TRACKS.map((t) => (
-                      <option key={t.file} value={t.file}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="text-neutral-200">3曲ループ（{BGM_TRACKS.map((t) => t.label).join(" → ")}）</div>
                   <div className="flex items-center gap-2">
                     <div className="text-neutral-500">vol</div>
                     <input type="range" min={0} max={1} step={0.05} value={bgmVolumeValue} onChange={(e) => setBgmVolume(e.target.value)} />

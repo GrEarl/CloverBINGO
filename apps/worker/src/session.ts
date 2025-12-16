@@ -644,8 +644,8 @@ export class SessionDurableObject {
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "ten", at: startedAt });
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
 
-    const stopTenAfterMs = randomIntInclusive(850, 1700);
-    const stopOneAfterMs = randomIntInclusive(850, 1700);
+    const stopTenAfterMs = randomIntInclusive(900, 5200);
+    const stopOneAfterMs = randomIntInclusive(900, 5200);
 
     const stopSequence = (async () => {
       const current = pending;
