@@ -23,3 +23,101 @@ body {
     filter: none;
   }
 }
+
+@keyframes clover-breath {
+  0% {
+    box-shadow: 0 0 140px rgba(0, 0, 0, 0.7), 0 0 0 rgba(234, 179, 8, 0);
+  }
+  45% {
+    box-shadow: 0 0 140px rgba(0, 0, 0, 0.7), 0 0 44px rgba(234, 179, 8, 0.06);
+  }
+  55% {
+    box-shadow: 0 0 140px rgba(0, 0, 0, 0.7), 0 0 56px rgba(234, 179, 8, 0.08);
+  }
+  100% {
+    box-shadow: 0 0 140px rgba(0, 0, 0, 0.7), 0 0 0 rgba(234, 179, 8, 0);
+  }
+}
+
+@keyframes clover-go {
+  0% {
+    opacity: 0;
+    filter: brightness(1);
+  }
+  25% {
+    opacity: 1;
+    filter: brightness(1.25);
+  }
+  100% {
+    opacity: 0;
+    filter: brightness(1);
+  }
+}
+
+@keyframes clover-confirm {
+  0% {
+    opacity: 0;
+    filter: brightness(1);
+  }
+  30% {
+    opacity: 1;
+    filter: brightness(1.2);
+  }
+  100% {
+    opacity: 0;
+    filter: brightness(1);
+  }
+}
+
+@keyframes clover-clunk {
+  0% {
+    transform: translate3d(0, -0.6%, 0) scale(1.02);
+  }
+  28% {
+    transform: translate3d(0, 0.9%, 0) scale(0.985);
+  }
+  65% {
+    transform: translate3d(0, -0.25%, 0) scale(1.005);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes clover-noise {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 240px -160px;
+  }
+}
+
+.clover-particle {
+  position: absolute;
+  left: var(--x, 50%);
+  top: -12vh;
+  width: var(--size, 10px);
+  height: var(--size, 10px);
+  border-radius: 9999px;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.9), rgba(234, 179, 8, 0.95) 36%, rgba(234, 179, 8, 0.15) 100%);
+  opacity: 0;
+  transform: translate3d(0, 0, 0) rotate(0deg);
+  will-change: transform, opacity;
+  filter: drop-shadow(0 0 10px rgba(234, 179, 8, 0.12));
+  animation: clover-particle-fall var(--dur, 1600ms) ease-in var(--delay, 0ms) 1 both;
+}
+
+@keyframes clover-particle-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+  }
+  12% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--dx, 0px), 110vh, 0) rotate(var(--rot, 240deg));
+  }
+}

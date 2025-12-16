@@ -50,6 +50,8 @@
 - [x] (2025-12-16 09:51Z) ローカル起動の安定化: `npm -w apps/worker run migrate:local` が Windows でも動くように修正し、`npm run dev` だけで D1 マイグレーションが適用されるようにした。
 - [x] (2025-12-16 10:30Z) UI事故修正: Tailwind のカスタム色（`pit-*`）がCSSに生成されず黒地に黒文字になっていたため、Participant/Display を既存の neutral 系 UI に戻して視認性を回復した。
 - [x] (2025-12-16 11:20Z) 音響/演出調整: BGM を3曲固定でループ再生し、SE音量を最大にする。prepare のコイン音を1回にし、リール停止時間のレンジを拡大した。
+- [x] (2025-12-16 21:27Z) `DESING.md` を反映: 会場表示（ten/one）の演出/UI を強化し、`?fx=0` / `?safe=1` / `prefers-reduced-motion` で抑制できるようにした。
+- [x] (2025-12-16 21:27Z) GO→確定のテンポを `reachCount` 段階で制御し、総尺上限（3.0s/3.6s/4.2s/4.8s）を守るようにした（`DESING.md` 3.2.1）。
 
 ## Surprises & Discoveries
 
@@ -61,6 +63,7 @@
 - React 19 + 本リポジトリの型設定では `JSX.Element` を直接参照できない箇所があったため、`ReactNode` を使うようにした。
 - `wrangler d1 migrations apply` は `--yes` を受け付けず確認プロンプトが出るため、Windows の npm scripts（cmd.exe）でも動くように `echo y |` で非対話化する必要があった。
 - Tailwind v4 では `tailwind.config.js` が自動適用されない構成があり、`apps/web/dist/assets/*.css` に `pit-` 系ユーティリティが生成されない状態になり得た（JSには `bg-pit-*` が残るため、結果として黒地に黒文字になる）。
+- `useSessionSocket` の `ServerEvent` は「未知イベント」も許容する union になっているため、画面側で `type` だけを見ると型が `unknown` に落ちる場合がある。安全に扱うには shape を検証する type guard が必要だった（例：Display の `draw.spin` / `draw.committed`）。
 
 ## Decision Log
 
@@ -124,6 +127,9 @@
 - Decision: Admin 音響は「BGM 3曲固定ループ + SE最大音量 + prepareコイン1回」に変更し、リール停止のランダム時間レンジを拡大する。
   Rationale: 会場の演出要件に合わせ、BGMの変化量とSEの聞き取りやすさ、停止タイミングのランダム性（演出幅）を増やすため。
   Date/Author: 2025-12-16 / codex
+- Decision: 会場表示（ten/one）の演出は `DESING.md` を実装仕様とし、追加依存なし（CSS + 最小限のJS / 必要なら Canvas2D）で実現する。`?fx=0` / `?safe=1` / `prefers-reduced-motion` で負荷と刺激を落とせるようにする。
+  Rationale: 会場表示は視認性と安定性が最優先で、当日の即死回避（演出OFF/安全モード）が必須。重い依存は増やさず、低スペックでも破綻しない実装に寄せる。
+  Date/Author: 2025-12-16 / codex
 
 ## Outcomes & Retrospective
 
@@ -132,6 +138,8 @@
 ## Context and Orientation
 
 現状は npm workspaces のモノレポで、Worker / Web / 共通ロジック（core）が揃っている状態です。音源（スロット系SE/BGM）は `audio_ogg/` に同梱されています（`audio_ogg/soundeffect/*.ogg` と `audio_ogg/bgm/*.ogg`）。
+
+会場表示（`/s/:code/display/ten` と `/s/:code/display/one`）の演出要件は `DESING.md` を正とします。実装上の必須ポイントは、(1) 数字の可読性最優先（遠目で読める、情報過多にしない）、(2) 状態遷移（IDLE→GO→片側停止→確定→IDLE）で「スロットの機械感（clunk/snap/rebound）」が出る、(3) 回線不安定時は演出を止めて落ち着いた表示（`RECONNECTING…`）にする、(4) 当日保険として `?fx=0`（演出ほぼOFF）と `?safe=1`（粒子/シェイク/強い発光変化/過度なじらし抑制）を必ず持つ、の4点です。
 
 Admin の音響仕様（このExecPlanでの合意）:
 
@@ -222,6 +230,7 @@ Admin の音響仕様（このExecPlanでの合意）:
 - UI/UX: 参加者ページはスマホのファーストビューでカードが見える前提で、表示情報を必要最小限（カード/直近/WS状態/再参加）に絞る。
 - UI/UX: Modページは参加者全員のカードをグリッドで一覧監視でき、★でスポットライト下書きを編集できる。
 - UI/UX: 会場表示は遠距離でも読める大きさ/コントラストを維持し、常時表示する情報（オーバーレイ）は最小限に抑える。
+- UI/UX: 会場表示の演出は `DESING.md` の受け入れチェックを満たし、`?fx=0` / `?safe=1` / `prefers-reduced-motion` で段階的に抑制できる（当日保険）。
 - Admin 音響: BGM が常時ループし、SE 再生中のみ BGM 音量が 50% になる。SE は上記のトリガーに従って鳴る（prepareシーケンス、spinning中の7秒ループ、桁stop、commit後の開放人数表示、新規BINGO、複数BINGOの名前表示完了）。
 
 ## Idempotence and Recovery
@@ -279,3 +288,4 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-16 10:30Z: Participant/Display の `pit-*` 依存を撤去し、既存の neutral 系 UI（日本語・共通UIプリミティブ）へ復帰させて視認性を回復した。
 - 2025-12-16 11:12Z: 音響と演出（BGM3曲ループ、SE最大、prepareコイン1回、停止時間レンジ拡大）の方針変更を反映するため、仕様を更新した。
 - 2025-12-16 11:20Z: `apps/web` の音響実装と `apps/worker` の停止時間レンジを更新し、型チェック/ビルド/テストで成立を確認した。
+- 2025-12-16 21:00Z: 会場表示（ten/one）の演出要件が `DESING.md` として追加されたため、Progress/Context/Acceptance/Decision を更新し、この仕様に追従する実装を開始する。

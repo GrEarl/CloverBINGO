@@ -9,6 +9,7 @@ type Role = "participant" | "display" | "admin" | "mod";
 type DisplayScreen = "ten" | "one";
 
 type ReelStatus = "idle" | "spinning" | "stopped";
+type ReachIntensity = 0 | 1 | 2 | 3;
 
 const ADMIN_INVITE_COOKIE = "cloverbingo_admin";
 const MOD_INVITE_COOKIE = "cloverbingo_mod";
@@ -91,6 +92,29 @@ function randomIntInclusive(min: number, max: number): number {
   const hi = Math.floor(Math.max(min, max));
   if (hi <= lo) return lo;
   return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+function reachIntensityFromCount(reachCount: number): ReachIntensity {
+  if (!Number.isFinite(reachCount)) return 0;
+  if (reachCount <= 1) return 0;
+  if (reachCount <= 4) return 1;
+  if (reachCount <= 8) return 2;
+  return 3;
+}
+
+function spinTimingForIntensity(intensity: ReachIntensity): { totalMaxMs: number; gapMinMs: number; gapMaxMs: number } {
+  const totalMaxMs = [3000, 3600, 4200, 4800][intensity];
+  const teaseDelayMin = [0, 150, 250, 450][intensity];
+  const teaseDelayMax = [0, 250, 450, 650][intensity];
+  const holdMin = [0, 120, 220, 380][intensity];
+  const holdMax = [0, 220, 380, 520][intensity];
+  const baseGapMin = 350;
+  const baseGapMax = 700;
+  return {
+    totalMaxMs,
+    gapMinMs: baseGapMin + teaseDelayMin + holdMin,
+    gapMaxMs: baseGapMax + teaseDelayMax + holdMax,
+  };
 }
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
@@ -644,24 +668,32 @@ export class SessionDurableObject {
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "ten", at: startedAt });
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
 
-    const stopTenAfterMs = randomIntInclusive(900, 5200);
-    const stopOneAfterMs = randomIntInclusive(900, 5200);
+    const reachCount = computeSessionStats(Object.values(this.players).map((p) => p.progress)).reachPlayers;
+    const reachIntensity = reachIntensityFromCount(reachCount);
+    const timing = spinTimingForIntensity(reachIntensity);
+
+    const gapMs = randomIntInclusive(timing.gapMinMs, timing.gapMaxMs);
+    const firstStopAfterMs = randomIntInclusive(900, timing.totalMaxMs - gapMs);
+    const secondStopAfterMs = firstStopAfterMs + gapMs;
+
+    const firstDigit: DisplayScreen = Math.random() < 0.5 ? "ten" : "one";
+    const secondDigit: DisplayScreen = firstDigit === "ten" ? "one" : "ten";
 
     const stopSequence = (async () => {
       const current = pending;
       const number = current.number;
       await Promise.all([
         (async () => {
-          await sleepMs(stopTenAfterMs);
+          await sleepMs(firstStopAfterMs);
           if (this.pendingDraw !== current) return;
-          if (current.reel.ten !== "spinning") return;
-          const digitValue = digitsOf(number).ten;
-          current.reel.ten = "stopped";
-          current.stoppedDigits.ten = digitValue;
+          if (current.reel[firstDigit] !== "spinning") return;
+          const digitValue = digitsOf(number)[firstDigit];
+          current.reel[firstDigit] = "stopped";
+          current.stoppedDigits[firstDigit] = digitValue;
           this.broadcastEvent((a) => a?.role === "display", {
             type: "draw.spin",
             action: "stop",
-            digit: "ten",
+            digit: firstDigit,
             at: nowMs(),
             digitValue,
           });
@@ -669,16 +701,16 @@ export class SessionDurableObject {
           this.broadcastSnapshots();
         })(),
         (async () => {
-          await sleepMs(stopOneAfterMs);
+          await sleepMs(secondStopAfterMs);
           if (this.pendingDraw !== current) return;
-          if (current.reel.one !== "spinning") return;
-          const digitValue = digitsOf(number).one;
-          current.reel.one = "stopped";
-          current.stoppedDigits.one = digitValue;
+          if (current.reel[secondDigit] !== "spinning") return;
+          const digitValue = digitsOf(number)[secondDigit];
+          current.reel[secondDigit] = "stopped";
+          current.stoppedDigits[secondDigit] = digitValue;
           this.broadcastEvent((a) => a?.role === "display", {
             type: "draw.spin",
             action: "stop",
-            digit: "one",
+            digit: secondDigit,
             at: nowMs(),
             digitValue,
           });
