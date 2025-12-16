@@ -308,8 +308,8 @@ export default function DisplayPage() {
         )}
 
         {/* Center: reel */}
-        <div className="flex items-center justify-center lg:order-2">
-          <div className="text-center">
+        <div className={cn("flex items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
+          <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
             <div
               className={[
                 "font-black tabular-nums tracking-tight",
