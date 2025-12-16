@@ -47,6 +47,7 @@
 - [x] (2025-12-15 14:39Z) イベント運用UX改善: Adminのキー誤動作防止（入力中は無視・無効状態はローカルで案内）、Displayの再接続/オフラインの常時表示、Modの `updatedBy` を運用名入力に対応した。あわせて WS 状態表示の文言を日本語化した（prepare必須は維持）。
 - [x] (2025-12-15 14:44Z) 文字コード統一: リポジトリの主要テキストファイルが UTF-8 として妥当であることを検証し、`.editorconfig` で `charset=utf-8` を明示した。
 - [x] (2025-12-16 09:43Z) P0修正: Web の `BingoCard` が core の `BingoCard`（2次元配列）と一致するように描画/型を修正し、`variant/showHeaders` の既存呼び出しと整合させた。
+- [x] (2025-12-16 09:51Z) ローカル起動の安定化: `npm -w apps/worker run migrate:local` が Windows でも動くように修正し、`npm run dev` だけで D1 マイグレーションが適用されるようにした。
 
 ## Surprises & Discoveries
 
@@ -56,6 +57,7 @@
 - WebSocket 再接続が固定間隔だと瞬断/デプロイ後に同時再接続が起きやすいため、指数バックオフ + ジッターに変更した。
 - `vite build` は TypeScript の型エラーを検出しないため、`npx tsc -p apps/web/tsconfig.json --noEmit` を回して HomePage の型エラーを修正した。
 - React 19 + 本リポジトリの型設定では `JSX.Element` を直接参照できない箇所があったため、`ReactNode` を使うようにした。
+- `wrangler d1 migrations apply` は `--yes` を受け付けず確認プロンプトが出るため、Windows の npm scripts（cmd.exe）でも動くように `echo y |` で非対話化する必要があった。
 
 ## Decision Log
 
@@ -262,3 +264,4 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-15 14:39Z: イベント運用UXレビューに基づき、Adminのキー誤動作防止、会場表示の接続異常常時表示、Modの更新者名入力、WS状態文言の日本語化を反映した（prepare必須は維持）。
 - 2025-12-15 14:44Z: 文字コードの要件に合わせ、UTF-8の妥当性チェックと `.editorconfig` を追加した。
 - 2025-12-16 09:43Z: レビュー指摘（BingoCard が core 型と不整合）に対応し、Web 側のカード描画コンポーネントを修正した。
+- 2025-12-16 09:51Z: `migrate:local` が Windows（cmd.exe）で `printf` 不在により失敗する問題を修正し、Worker の dev 起動時に D1 マイグレーションを自動適用するようにした。
