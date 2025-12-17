@@ -1,0 +1,34 @@
+# NOTE: このファイルはサンプル（コミットOK）です。
+#
+# GitHub に account_id / database_id を載せずにデプロイするために、
+# 次を行って `apps/worker/wrangler.local.toml`（gitignore済み）を用意してください。
+#
+# 1) `cp apps/worker/wrangler.local.toml.example apps/worker/wrangler.local.toml`
+# 2) `account_id` と `database_id` を自分の値に置き換える
+# 3) デプロイ例: `cd apps/worker && npx wrangler -c wrangler.local.toml deploy --assets ../web/dist`
+
+name = "cloverbingo"
+main = "src/index.ts"
+compatibility_date = "2025-12-14"
+
+# Cloudflare のアカウントID（複数アカウントがある場合、非対話実行で必須）
+account_id = "00000000000000000000000000000000"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cloverbingo"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionDurableObject" }
+]
+
+[assets]
+directory = "../web/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = [ "SessionDurableObject" ]

@@ -63,6 +63,22 @@ Cloudflare へのデプロイは Wrangler を使います。事前に Cloudflare
 
     npx wrangler login
 
+### 事前設定（GitHub にIDを載せない）
+
+`apps/worker/wrangler.toml` の `account_id` / `database_id` はコミットしない方針なので、ローカル専用の設定を作ります。
+
+1) サンプルをコピー（gitignore 済み）
+
+    cp apps/worker/wrangler.local.toml.example apps/worker/wrangler.local.toml
+
+2) `apps/worker/wrangler.local.toml` の `account_id` / `database_id` を自分の値で埋める
+
+- `account_id`: Wrangler のエラー表示に出るもの、または Cloudflare ダッシュボードで確認
+- `database_id`: `cd apps/worker && npx wrangler d1 create cloverbingo` の出力に出る UUID（既にある場合は `npx wrangler d1 list`）
+
+以後、`apps/worker` の npm scripts（`dev`/`deploy`/`create-session` 等）は `wrangler.local.toml` があれば自動で使います（このリポジトリにはIDが残りません）。
+手動で叩く場合は `cd apps/worker && npx wrangler -c wrangler.local.toml ...` の形式が安全です。
+
 ### 方式A: Worker 1本で Web も配信（おすすめ・同一オリジン）
 
 この方式は Web が同一オリジンになるので、CORS 設定が不要です。
@@ -73,7 +89,7 @@ Cloudflare へのデプロイは Wrangler を使います。事前に Cloudflare
 
 2) Worker を `apps/web/dist` を静的アセットとして一緒にデプロイ
 
-    npm -w apps/worker run deploy -- --assets ../web/dist
+    npm -w apps/worker run deploy
 
 ### 方式B: Web を Cloudflare Pages、API を Worker（分離）
 

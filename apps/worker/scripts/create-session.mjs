@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -27,7 +28,15 @@ function buildUrls(code, adminToken, modToken) {
 }
 
 function runWrangler(args) {
-  return execFileSync("wrangler", args, { cwd: workerDir(), stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  const explicitConfig = process.env.CLOVERBINGO_WRANGLER_CONFIG?.trim();
+  const localConfig = path.resolve(workerDir(), "wrangler.local.toml");
+  const configPath = explicitConfig ? path.resolve(workerDir(), explicitConfig) : fs.existsSync(localConfig) ? localConfig : null;
+  const configArgs = configPath ? ["--config", configPath] : [];
+  return execFileSync("wrangler", [...configArgs, ...args], {
+    cwd: workerDir(),
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
 }
 
 function tryCreateOnce(mode) {

@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run migrate:local && wrangler dev --local --persist-to .wrangler/state --port 8787",
-    "deploy": "wrangler deploy",
-    "migrate:local": "echo y | wrangler d1 migrations apply DB --local --persist-to .wrangler/state",
+    "dev": "npm run migrate:local && node scripts/run-wrangler.mjs dev --local --persist-to .wrangler/state --port 8787",
+    "deploy": "node scripts/run-wrangler.mjs deploy --assets ../web/dist",
+    "migrate:local": "echo y | node scripts/run-wrangler.mjs d1 migrations apply DB --local --persist-to .wrangler/state",
     "create-session": "node scripts/create-session.mjs",
     "ws:load": "node scripts/ws-load.mjs"
   },

@@ -52,6 +52,7 @@
 - [x] (2025-12-16 11:20Z) 音響/演出調整: BGM を3曲固定でループ再生し、SE音量を最大にする。prepare のコイン音を1回にし、リール停止時間のレンジを拡大した。
 - [x] (2025-12-16 21:27Z) `DESING.md` を反映: 会場表示（ten/one）の演出/UI を強化し、`?fx=0` / `?safe=1` / `prefers-reduced-motion` で抑制できるようにした。
 - [x] (2025-12-16 21:27Z) GO→確定のテンポを `reachCount` 段階で制御し、総尺上限（3.0s/3.6s/4.2s/4.8s）を守るようにした（`DESING.md` 3.2.1）。
+- [x] (2025-12-17 02:01Z) デプロイ実運用に合わせ、FreeプランのDO制約（`new_sqlite_classes`）と SPA ルートの 404 回避（assets の `not_found_handling`）を反映し、さらに `account_id` / `database_id` を `wrangler.local.toml`（gitignore）へ分離して GitHub へ push 可能にした。
 
 ## Surprises & Discoveries
 
@@ -64,6 +65,8 @@
 - `wrangler d1 migrations apply` は `--yes` を受け付けず確認プロンプトが出るため、Windows の npm scripts（cmd.exe）でも動くように `echo y |` で非対話化する必要があった。
 - Tailwind v4 では `tailwind.config.js` が自動適用されない構成があり、`apps/web/dist/assets/*.css` に `pit-` 系ユーティリティが生成されない状態になり得た（JSには `bg-pit-*` が残るため、結果として黒地に黒文字になる）。
 - `useSessionSocket` の `ServerEvent` は「未知イベント」も許容する union になっているため、画面側で `type` だけを見ると型が `unknown` に落ちる場合がある。安全に扱うには shape を検証する type guard が必要だった（例：Display の `draw.spin` / `draw.committed`）。
+- Cloudflare Free プランでは Durable Objects を使う際に `new_sqlite_classes` の migration が必要で、`new_classes` だと deploy が失敗する（code: 10097）。
+- Workers の静的アセット配信で SPA ルート（例：`/s/:code`）が 404 になり得るため、assets の `not_found_handling = "single-page-application"` を有効化する必要があった（API は `/api/*` を Worker 優先にする）。
 
 ## Decision Log
 
@@ -130,6 +133,9 @@
 - Decision: 会場表示（ten/one）の演出は `DESING.md` を実装仕様とし、追加依存なし（CSS + 最小限のJS / 必要なら Canvas2D）で実現する。`?fx=0` / `?safe=1` / `prefers-reduced-motion` で負荷と刺激を落とせるようにする。
   Rationale: 会場表示は視認性と安定性が最優先で、当日の即死回避（演出OFF/安全モード）が必須。重い依存は増やさず、低スペックでも破綻しない実装に寄せる。
   Date/Author: 2025-12-16 / codex
+- Decision: `account_id` / `database_id` はリポジトリにコミットせず、`apps/worker/wrangler.local.toml`（gitignore）でローカル/CI 側に持つ。Worker 側の npm scripts とセッション作成スクリプトは `wrangler.local.toml` があれば自動で使う。
+  Rationale: GitHub に識別子を残さずにデプロイ手順を成立させ、複数アカウント環境でも非対話運用（`echo y | ...`）で事故りにくくするため。
+  Date/Author: 2025-12-17 / codex
 
 ## Outcomes & Retrospective
 
@@ -289,3 +295,4 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-16 11:12Z: 音響と演出（BGM3曲ループ、SE最大、prepareコイン1回、停止時間レンジ拡大）の方針変更を反映するため、仕様を更新した。
 - 2025-12-16 11:20Z: `apps/web` の音響実装と `apps/worker` の停止時間レンジを更新し、型チェック/ビルド/テストで成立を確認した。
 - 2025-12-16 21:00Z: 会場表示（ten/one）の演出要件が `DESING.md` として追加されたため、Progress/Context/Acceptance/Decision を更新し、この仕様に追従する実装を開始する。
+- 2025-12-17 02:01Z: Cloudflare 実デプロイで判明した制約（Freeプランの `new_sqlite_classes` 必須、SPA ルート 404 回避）に追従し、あわせて `account_id` / `database_id` を `wrangler.local.toml`（gitignore）へ分離して GitHub へ push できる形に整理した。
