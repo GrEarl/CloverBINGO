@@ -124,6 +124,7 @@ export default function DisplayPage() {
   const [shake, setShake] = useState<"none" | "small" | "medium" | "violent">("none");
   const shakeTimerRef = useRef<number | null>(null);
   const [glitch, setGlitch] = useState(false);
+  const [strobe, setStrobe] = useState(false);
   
   const [popDigit, setPopDigit] = useState(false);
   const popTimerRef = useRef<number | null>(null);
@@ -172,12 +173,12 @@ export default function DisplayPage() {
   const bingoParticles = useMemo(() => {
     if (!bingoFx || safeMode || !fxActive) return [];
     const list: Array<{ key: string; style: CSSProperties }> = [];
-    for (let i = 0; i < 25; i += 1) { // More particles
+    for (let i = 0; i < 30; i += 1) { // Even more particles
       const side = i % 2 === 0 ? "left" : "right";
       const xBase = side === "left" ? 10 : 78;
       const xJitter = Math.random() * 20;
       const x = xBase + xJitter;
-      const size = 8 + Math.floor(Math.random() * 14);
+      const size = 10 + Math.floor(Math.random() * 20);
       const delay = Math.floor(Math.random() * 300);
       const dur = 1000 + Math.floor(Math.random() * 800);
       const dx = (side === "left" ? 1 : -1) * (30 + Math.floor(Math.random() * 50));
@@ -238,7 +239,6 @@ export default function DisplayPage() {
           if (goPulseTimerRef.current) window.clearTimeout(goPulseTimerRef.current);
           goPulseTimerRef.current = window.setTimeout(() => setGoPulse(false), 560);
           
-          // Trigger small shake on spin start
           triggerShake("small");
         }
       }
@@ -266,7 +266,6 @@ export default function DisplayPage() {
       if (fxActive && !safeMode) {
         setConfirmedPulse(true);
         confirmedPulseTimerRef.current = window.setTimeout(() => setConfirmedPulse(false), 180);
-        // Medium shake on commit
         triggerShake("medium");
       }
 
@@ -283,11 +282,15 @@ export default function DisplayPage() {
         const key = Date.now();
         setBingoAnnounce({ key, names: newBingoNames, showNames: safeMode });
         
-        // Violent shake on Bingo!
+        // VJ-Level FX (disabled in safe/reduced-motion mode)
         triggerShake("violent");
-        setGlitch(true);
-        setTimeout(() => setGlitch(false), 1000);
-
+        if (fxActive && !safeMode) {
+          setGlitch(true);
+          setTimeout(() => setGlitch(false), 1200);
+          setStrobe(true);
+          setTimeout(() => setStrobe(false), 2000);
+        }
+        
         const revealDelayMs = safeMode ? 0 : randomIntInclusive(250, 650);
         if (!safeMode) {
           bingoAnnounceNameTimerRef.current = window.setTimeout(() => {
@@ -545,14 +548,16 @@ export default function DisplayPage() {
 
   const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
   const glitchClass = glitch ? "glitch-active" : "";
+  const strobeClass = strobe ? "strobe-active" : "";
 
   return (
+    <div className="crt-stage bg-black">
     <main
       className={cn(
         "relative min-h-dvh overflow-hidden text-pit-text-main font-mono bg-pit-bg crt-monitor",
       )}
     >
-      <div className="crt-overlay" />
+      <div className={cn("crt-overlay", fxActive && !safeMode && "crt-overlay-flicker")} />
 
       {/* Juice Container */}
       <div className={cn("relative z-10 size-full transition-transform", shakeClass)}>
@@ -567,6 +572,8 @@ export default function DisplayPage() {
               !safeMode && "animate-[clover-noise_8s_linear_infinite]",
             )}
           />
+          {/* Strobe Layer */}
+          <div className={cn("pointer-events-none fixed inset-0 z-[5] mix-blend-overlay", strobeClass)} />
         </>
       )}
 
@@ -820,5 +827,6 @@ export default function DisplayPage() {
       </div>
       </div>
     </main>
+    </div>
   );
 }

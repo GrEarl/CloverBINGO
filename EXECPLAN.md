@@ -61,6 +61,10 @@
 - [x] (2025-12-17 05:46Z) 仕様再確認対応: Mod の要件は「セッション無効化」ではなく「特定参加者（不正/重複）の無効化/復帰」だったため、Mod end/reopen（`/api/mod/end` / `/api/mod/reopen`）を撤去し、参加者単位の無効化/復帰（D1 `participants.status`、Mod UI から切替、disabled は判定/統計/スポットライト/新規BINGO対象から除外）を実装した。
 - [x] (2025-12-17 04:30Z) Admin音響: BGM の無音を詰める（できるだけギャップを減らす）、ducking を強め（目安 75%）、SFX/BGM の音量感を合わせる（BGM末尾の無音をタイマーでスキップし、ducking 75% + SFX音量スライダーを追加）。
 - [x] (2025-12-17 04:30Z) 会場表示: 演出のタメやエフェクトを詰め、全体の表示を PS1 風（ローポリ/ピクセル寄り）の質感に少し寄せる（視認性は維持）（デジタル格子の薄いオーバーレイ、BINGO名タイムライン、確定後の読みやすさ強調時間などを調整）。
+- [x] (2025-12-17 08:24Z) Gemini による演出変更の未コミット差分を精査し、回帰の原因候補（全体CSSでの `overflow:hidden` によるスクロール阻害、Tailwind v4 の `@config` 削除、Display の safeMode/reduced-motion でのスピン速度固定化）を特定した。
+- [x] (2025-12-17 08:24Z) Admin/Mod/Participant を含む全画面の操作性を壊さないよう、共有CSSの回帰（`overflow:hidden` / Tailwind `@config` 削除）を戻しつつ Display 向けの追加スタイルは `.crt-*` 等のクラス適用時のみ効くように限定した。
+- [x] (2025-12-17 08:24Z) Display の safeMode/reduced-motion においてスピン間隔を復元し、強いフラッシュ系演出（CRT flicker / strobe）は safeMode で抑制するようにした（初期 snapshot 未到達でも `view` アクセスで落ちない状態を維持）。
+- [x] (2025-12-17 08:24Z) `npx tsc -p apps/web/tsconfig.json --noEmit` と `npm -w apps/web run build` を通し、音源（OGG）が dist にコピーされ参照パスが一致していることを確認した。
 
 ## Surprises & Discoveries
 
@@ -76,6 +80,7 @@
 - Cloudflare Free プランでは Durable Objects を使う際に `new_sqlite_classes` の migration が必要で、`new_classes` だと deploy が失敗する（code: 10097）。
 - Workers の静的アセット配信で SPA ルート（例：`/s/:code`）が 404 になり得るため、assets の `not_found_handling = "single-page-application"` を有効化する必要があった（API は `/api/*` を Worker 優先にする）。
 - 要件の再確認により「Modでセッションを無効化/復帰」そのものが不要になったため、ended セッションの招待入室（cookie付与）を許可する構成は撤去し、通常通り ended では `/api/invite/enter` を拒否する。
+- 演出（Display）向けの全体CSS変更で `html, body { overflow:hidden; }` が入ると Admin/Mod/Participant の縦スクロールができなくなり、結果として音の有効化などの操作に影響し得る。さらに Tailwind v4 の `@config` 削除は `pit-*` 系ユーティリティ未生成（黒地に黒文字）を再発させ得るため、共有CSSは慎重に扱う必要がある。
 
 ## Decision Log
 
