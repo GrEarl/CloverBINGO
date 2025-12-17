@@ -27,7 +27,8 @@ export default {
       },
       fontFamily: {
         // Fallback to standard sans/mono, but plan to swap if a better font is found
-        mono: ['"Courier Prime"', '"Courier New"', 'monospace'], // Typewriter/Terminal feel
+        mono: ['"VT323"', 'monospace'], // Retro terminal feel
+        header: ['"Share Tech Mono"', 'monospace'], // Technical headers
         sans: ['"Inter"', 'sans-serif'],
       },
       backgroundImage: {

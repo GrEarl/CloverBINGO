@@ -12,15 +12,14 @@ export default function Alert({ className, variant = "info", ...props }: AlertPr
   return (
     <div
       className={cn(
-        "rounded-lg border p-4 text-sm",
-        variant === "info" && "border-neutral-800 bg-neutral-950/40 text-neutral-200",
-        variant === "success" && "border-emerald-700/40 bg-emerald-950/30 text-emerald-200",
-        variant === "warning" && "border-amber-800/60 bg-amber-950/30 text-amber-200",
-        variant === "danger" && "border-red-800/60 bg-red-950/30 text-red-200",
+        "border px-4 py-3 text-sm font-bold tracking-wide",
+        variant === "info" && "border-pit-border bg-pit-surface text-pit-text-main",
+        variant === "success" && "border-pit-secondary/60 bg-pit-secondary/10 text-pit-secondary",
+        variant === "warning" && "border-pit-primary/60 bg-pit-primary/10 text-pit-primary",
+        variant === "danger" && "border-pit-danger/60 bg-pit-danger/10 text-pit-danger",
         className,
       )}
       {...props}
     />
   );
 }
-

@@ -19,18 +19,18 @@ export default function BingoCard({ card, drawnNumbers, variant = "default", sho
   const headers = ["B", "I", "N", "G", "O"];
   const isCompact = variant === "compact";
 
-  const gapClass = isCompact ? "gap-1" : "gap-2";
+  const gapClass = isCompact ? "gap-px" : "gap-1";
 
   return (
-    <div className={cn("w-full", variant === "default" && "max-w-md", className)}>
+    <div className={cn("w-full font-mono", variant === "default" && "max-w-md", className)}>
       {showHeaders && (
         <div className={cn("grid grid-cols-5", gapClass)}>
           {headers.map((h) => (
             <div
               key={h}
               className={cn(
-                "text-center font-semibold text-neutral-300",
-                isCompact ? "text-[0.55rem] tracking-[0.25em]" : "text-xs tracking-[0.3em]",
+                "text-center font-bold text-pit-text-muted bg-pit-surface border border-transparent",
+                isCompact ? "text-[0.6rem] tracking-widest py-0.5" : "text-sm tracking-widest py-1",
               )}
             >
               {h}
@@ -49,12 +49,12 @@ export default function BingoCard({ card, drawnNumbers, variant = "default", sho
                 key={`${rIdx}-${cIdx}`}
                 className={[
                   cn(
-                    "aspect-square select-none border text-center font-semibold leading-[1] flex items-center justify-center",
-                    isCompact ? "rounded-md" : "rounded-lg",
+                    "aspect-square select-none border text-center font-bold leading-[1] flex items-center justify-center transition-all duration-300",
+                    isCompact ? "text-xs" : "text-lg",
                   ),
                   marked
-                    ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
-                    : "border-neutral-800 bg-neutral-950/40 text-neutral-100",
+                    ? "border-pit-primary bg-pit-primary text-black shadow-[0_0_10px_rgba(234,179,8,0.4)] scale-100 z-10"
+                    : "border-pit-border bg-pit-bg text-pit-text-dim",
                 ].join(" ")}
               >
                 <span
@@ -65,10 +65,15 @@ export default function BingoCard({ card, drawnNumbers, variant = "default", sho
                         : "text-[0.7rem] tracking-[0.2em]"
                       : isCompact
                         ? "text-xs"
-                        : "text-lg",
+                        : "text-xl",
                   )}
                 >
-                  {label}
+                  {marked && !isFree(cell) ? (
+                    // Stamp effect for marked numbers (simple X or just bold inverted color as above)
+                    <span className="block scale-110">{label}</span>
+                  ) : (
+                    label
+                  )}
                 </span>
               </div>
             );

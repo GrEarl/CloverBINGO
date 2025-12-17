@@ -42,12 +42,12 @@ function fmtNum(n: number | null | undefined): string {
 
 function relativeFromNow(ms: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (sec < 10) return "いま";
-  if (sec < 60) return `${sec}秒前`;
+  if (sec < 10) return "NOW";
+  if (sec < 60) return `${sec}s AGO`;
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}分前`;
+  if (min < 60) return `${min}m AGO`;
   const hr = Math.floor(min / 60);
-  return `${hr}時間前`;
+  return `${hr}h AGO`;
 }
 
 function randomIntInclusive(min: number, max: number): number {
@@ -90,6 +90,9 @@ function isDrawCommittedEvent(ev: unknown): ev is DrawCommittedEvent {
   return true;
 }
 
+// Decoding effect characters
+const DECODE_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+-=[]{}|;:,.<>?";
+
 export default function DisplayPage() {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -111,11 +114,17 @@ export default function DisplayPage() {
   const safeMode = safeRequested || prefersReducedMotion || !connected;
   const fxActive = fxEnabled && connected;
 
-  const [shownDigit, setShownDigit] = useState<number | null>(null);
+  const [shownDigit, setShownDigit] = useState<string | number | null>(null);
   const timerRef = useRef<number | null>(null);
   const [overlayVisible, setOverlayVisible] = useState(true);
   const hideOverlayTimerRef = useRef<number | null>(null);
   const prevReelStatusRef = useRef<string | null>(null);
+  
+  // Juice States
+  const [shake, setShake] = useState<"none" | "small" | "medium" | "violent">("none");
+  const shakeTimerRef = useRef<number | null>(null);
+  const [glitch, setGlitch] = useState(false);
+  
   const [popDigit, setPopDigit] = useState(false);
   const popTimerRef = useRef<number | null>(null);
 
@@ -148,20 +157,30 @@ export default function DisplayPage() {
   const visualReachIntensity: ReachIntensity = safeMode ? (Math.min(1, reachIntensity) as ReachIntensity) : reachIntensity;
   const isSpinning = view?.reel.status === "spinning";
   const isLastSpinning = Boolean(isSpinning && reelSignal[otherDigit] === "stopped");
-  const slowSpinMs = (safeMode ? 115 : 85) + (fxActive ? visualReachIntensity * 10 : 0);
-  const spinIntervalMs = !fxEnabled ? 90 : isLastSpinning ? slowSpinMs : safeMode ? 80 : 45;
+  
+  // Spin speed: slow down in safe/reduced-motion mode to reduce motion and CPU load.
+  const spinIntervalMs = safeMode || !fxEnabled ? 90 : isLastSpinning ? 60 : 40;
+
+  // Trigger shake helper
+  const triggerShake = (intensity: "small" | "medium" | "violent") => {
+    if (safeMode || !fxActive) return;
+    setShake(intensity);
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+    shakeTimerRef.current = window.setTimeout(() => setShake("none"), intensity === "violent" ? 600 : intensity === "medium" ? 400 : 200);
+  };
+
   const bingoParticles = useMemo(() => {
     if (!bingoFx || safeMode || !fxActive) return [];
     const list: Array<{ key: string; style: CSSProperties }> = [];
-    for (let i = 0; i < 18; i += 1) {
+    for (let i = 0; i < 25; i += 1) { // More particles
       const side = i % 2 === 0 ? "left" : "right";
       const xBase = side === "left" ? 10 : 78;
-      const xJitter = Math.random() * 14;
+      const xJitter = Math.random() * 20;
       const x = xBase + xJitter;
-      const size = 8 + Math.floor(Math.random() * 10);
-      const delay = Math.floor(Math.random() * 240);
-      const dur = 1200 + Math.floor(Math.random() * 900);
-      const dx = (side === "left" ? 1 : -1) * (20 + Math.floor(Math.random() * 40));
+      const size = 8 + Math.floor(Math.random() * 14);
+      const delay = Math.floor(Math.random() * 300);
+      const dur = 1000 + Math.floor(Math.random() * 800);
+      const dx = (side === "left" ? 1 : -1) * (30 + Math.floor(Math.random() * 50));
       const rot = (side === "left" ? 1 : -1) * (240 + Math.floor(Math.random() * 220));
       list.push({
         key: `${bingoFx.key}:${i}`,
@@ -218,6 +237,9 @@ export default function DisplayPage() {
           setGoPulse(true);
           if (goPulseTimerRef.current) window.clearTimeout(goPulseTimerRef.current);
           goPulseTimerRef.current = window.setTimeout(() => setGoPulse(false), 560);
+          
+          // Trigger small shake on spin start
+          triggerShake("small");
         }
       }
 
@@ -230,7 +252,7 @@ export default function DisplayPage() {
       if (lastCommittedSeqRef.current === lastEvent.seq) return;
       lastCommittedSeqRef.current = lastEvent.seq;
 
-      // Reset spin tracking. (After commit, snapshot reel status becomes idle.)
+      // Reset spin tracking.
       currentSpinIdRef.current = null;
       setReelSignal({ ten: "idle", one: "idle" });
       setGoPulse(false);
@@ -244,6 +266,8 @@ export default function DisplayPage() {
       if (fxActive && !safeMode) {
         setConfirmedPulse(true);
         confirmedPulseTimerRef.current = window.setTimeout(() => setConfirmedPulse(false), 180);
+        // Medium shake on commit
+        triggerShake("medium");
       }
 
       bingoAnnounceSeqRef.current += 1;
@@ -258,6 +282,11 @@ export default function DisplayPage() {
       if (newBingoNames.length > 0) {
         const key = Date.now();
         setBingoAnnounce({ key, names: newBingoNames, showNames: safeMode });
+        
+        // Violent shake on Bingo!
+        triggerShake("violent");
+        setGlitch(true);
+        setTimeout(() => setGlitch(false), 1000);
 
         const revealDelayMs = safeMode ? 0 : randomIntInclusive(250, 650);
         if (!safeMode) {
@@ -301,9 +330,11 @@ export default function DisplayPage() {
     if (typeof prevBingoPlayersRef.current !== "number") prevBingoPlayersRef.current = count;
   }, [view?.stats?.bingoPlayers]);
 
+  // DECODING EFFECT
   useEffect(() => {
     if (!view) return;
     const reelStatus = view.reel.status;
+    
     if (!connected) {
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -312,10 +343,13 @@ export default function DisplayPage() {
       if (reelStatus !== "spinning") setShownDigit(view.reel.digit);
       return;
     }
+    
     if (reelStatus === "spinning") {
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
-        setShownDigit(Math.floor(Math.random() * 10));
+        // Show random character from DECODE_CHARS
+        const char = DECODE_CHARS[Math.floor(Math.random() * DECODE_CHARS.length)];
+        setShownDigit(char);
       }, spinIntervalMs);
       return;
     }
@@ -336,6 +370,7 @@ export default function DisplayPage() {
       if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
       if (bingoAnnounceNameTimerRef.current) window.clearTimeout(bingoAnnounceNameTimerRef.current);
       if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
+      if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current);
     };
   }, []);
 
@@ -385,10 +420,10 @@ export default function DisplayPage() {
 
   if (!screen) {
     return (
-      <main className="min-h-dvh bg-neutral-950 text-neutral-50">
+      <main className="min-h-dvh bg-pit-bg text-pit-text-main font-mono">
         <div className="mx-auto max-w-xl px-6 py-10">
-          <h1 className="text-xl font-semibold">表示画面</h1>
-          <p className="mt-2 text-sm text-neutral-300">URL の末尾は /ten または /one を指定してください。</p>
+          <h1 className="text-xl font-semibold">DISPLAY_INIT_FAIL</h1>
+          <p className="mt-2 text-sm text-pit-text-dim">URL ENDPOINT INVALID. /ten OR /one REQUIRED.</p>
         </div>
       </main>
     );
@@ -417,30 +452,30 @@ export default function DisplayPage() {
     const p = sidePlayers[i] ?? null;
     if (p) {
       sideCards.push(
-        <div key={`spotlight:${i}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+        <div key={`spotlight:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
           <div className="flex items-center justify-between gap-3">
-            <div className="truncate text-xl font-semibold text-neutral-50">{p.displayName}</div>
-            {p.progress.isBingo && <Badge variant="success">BINGO</Badge>}
+            <div className="truncate text-xl font-bold text-pit-text-main text-glow">{p.displayName}</div>
+            {p.progress.isBingo && <Badge variant="success" className="animate-pulse">BINGO</Badge>}
           </div>
           {p.card ? (
             <div className="mt-3">
               <BingoCard card={p.card} drawnNumbers={drawnNumbers} showHeaders={false} className="max-w-none" />
             </div>
           ) : (
-            <div className="mt-3 text-sm text-neutral-400">カードなし</div>
+            <div className="mt-3 text-sm text-pit-text-dim">NO CARD DATA</div>
           )}
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-neutral-300">
-            <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
-              <div className="text-[0.65rem] text-neutral-500">min</div>
-              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.minMissingToLine}</div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-pit-text-dim">
+            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
+              <div className="text-[0.65rem] text-pit-text-muted">MIN</div>
+              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.minMissingToLine}</div>
             </div>
-            <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
-              <div className="text-[0.65rem] text-neutral-500">reach</div>
-              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.reachLines}</div>
+            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
+              <div className="text-[0.65rem] text-pit-text-muted">REACH</div>
+              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.reachLines}</div>
             </div>
-            <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
-              <div className="text-[0.65rem] text-neutral-500">lines</div>
-              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.bingoLines}</div>
+            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
+              <div className="text-[0.65rem] text-pit-text-muted">LINES</div>
+              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.bingoLines}</div>
             </div>
           </div>
         </div>,
@@ -452,20 +487,20 @@ export default function DisplayPage() {
     emptyRank += 1;
     if (rank === 0) {
       sideCards.push(
-        <div key={`stats-detail:${i}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-          <div className="text-xs text-neutral-500">統計（詳細）</div>
-          <div className="mt-2 grid gap-1 text-sm text-neutral-300">
+        <div key={`stats-detail:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+          <div className="text-xs text-pit-text-muted">STATS_DETAIL_DUMP</div>
+          <div className="mt-2 grid gap-1 text-sm text-pit-text-dim">
             <div>
-              0手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
+              [0]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
             </div>
             <div>
-              1手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
+              [1]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
             </div>
             <div>
-              2手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
+              [2]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
             </div>
             <div>
-              3+: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
+              [3+]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
             </div>
           </div>
         </div>,
@@ -475,15 +510,15 @@ export default function DisplayPage() {
 
     if (rank === 1) {
       sideCards.push(
-        <div key={`recent:${i}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-          <div className="text-xs text-neutral-500">直近</div>
+        <div key={`recent:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+          <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {(view?.lastNumbers ?? []).slice().reverse().slice(0, 8).map((n, idx) => (
-              <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+              <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
                 {n}
               </div>
             ))}
-            {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+            {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
           </div>
         </div>,
       );
@@ -491,64 +526,51 @@ export default function DisplayPage() {
     }
 
     sideCards.push(
-      <div key={`stats-core:${i}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-        <div className="text-xs text-neutral-500">統計（コア）</div>
-        <div className="mt-3 grid gap-2 text-sm text-neutral-200">
+      <div key={`stats-core:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+        <div className="text-xs text-pit-text-muted">CORE_STATS</div>
+        <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
           <div>
-            draw: <span className="font-mono text-neutral-50">{view?.drawCount ?? "—"}</span> / 75
+            DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
           </div>
           <div>
-            reach: <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span>
+            REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
           </div>
           <div>
-            bingo: <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
+            BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
           </div>
         </div>
       </div>,
     );
   }
 
+  const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
+  const glitchClass = glitch ? "glitch-active" : "";
+
   return (
     <main
       className={cn(
-        "relative min-h-dvh overflow-hidden text-neutral-50",
-        fxActive ? "bg-gradient-to-br from-neutral-950 via-neutral-900/10 to-neutral-950" : "bg-neutral-950",
+        "relative min-h-dvh overflow-hidden text-pit-text-main font-mono bg-pit-bg crt-monitor",
       )}
     >
+      <div className="crt-overlay" />
+
+      {/* Juice Container */}
+      <div className={cn("relative z-10 size-full transition-transform", shakeClass)}>
+
       {fxActive && (
         <>
+            {/* Vignette & texture (in addition to CRT) */}
           <div
             className={cn(
               "pointer-events-none fixed inset-0 z-0 bg-noise [background-size:180px_180px]",
-              safeMode ? "opacity-[0.08]" : isSpinning ? "opacity-[0.24]" : "opacity-[0.18]",
+              safeMode ? "opacity-[0.04]" : "opacity-[0.1]",
               !safeMode && "animate-[clover-noise_8s_linear_infinite]",
             )}
-          />
-          <div
-            className={cn(
-              "pointer-events-none fixed inset-0 z-0",
-              safeMode ? "opacity-[0.05]" : isSpinning ? "opacity-[0.13]" : "opacity-[0.10]",
-            )}
-            style={{
-              backgroundImage:
-                "repeating-linear-gradient(to bottom, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(0,0,0,0) 3px, rgba(0,0,0,0) 6px)",
-            }}
-          />
-          <div
-            className={cn(
-              "pointer-events-none fixed inset-0 z-0 mix-blend-overlay",
-              safeMode ? "opacity-[0.02]" : isSpinning ? "opacity-[0.05]" : "opacity-[0.04]",
-            )}
-            style={{
-              backgroundImage:
-                "linear-gradient(to right, rgba(255,255,255,0.06) 1px, rgba(0,0,0,0) 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, rgba(0,0,0,0) 1px)",
-              backgroundSize: "6px 6px",
-            }}
           />
         </>
       )}
 
-      {readableBoost && <div className="pointer-events-none fixed inset-0 z-10 bg-black/35" />}
+      {readableBoost && <div className="pointer-events-none fixed inset-0 z-10 bg-black/50" />}
 
       {(bingoFx || bingoAnnounce) && (
         <>
@@ -559,35 +581,35 @@ export default function DisplayPage() {
               ))}
             </div>
           )}
-          <div className="pointer-events-none fixed inset-0 z-40 flex items-start justify-center pt-20">
+          <div className={cn("pointer-events-none fixed inset-0 z-40 flex items-start justify-center pt-20", glitchClass)}>
             <div
               className={cn(
-                "rounded-2xl border px-6 py-4 text-center",
-                "border-amber-700/50 bg-amber-950/20 text-amber-100",
-                safeMode ? "shadow-[0_0_40px_rgba(234,179,8,0.12)]" : "shadow-[0_0_70px_rgba(234,179,8,0.18)]",
+                "border px-8 py-6 text-center backdrop-blur-sm",
+                "border-pit-primary bg-black/80 text-pit-primary",
+                safeMode ? "shadow-[0_0_40px_rgba(234,179,8,0.12)]" : "shadow-[0_0_100px_rgba(234,179,8,0.4)] box-glow",
               )}
             >
-              <div className="text-3xl font-black tracking-tight text-amber-200 drop-shadow-[0_0_24px_rgba(234,179,8,0.20)] md:text-5xl">
-                BINGO!
+              <div className="text-6xl font-black tracking-tighter text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.6)] md:text-8xl animate-pulse">
+                JACKPOT!
               </div>
               {bingoAnnounce && bingoAnnounce.showNames && (
                 <>
-                  <div className="mt-2 max-w-[84vw] truncate text-3xl font-semibold text-amber-100 md:text-5xl">
+                  <div className="mt-4 max-w-[84vw] truncate text-4xl font-bold text-white md:text-6xl text-glow">
                     {bingoAnnounce.names[0] ?? "?"}
                   </div>
                   {bingoAnnounce.names.length > 1 && (
-                    <div className="mt-2">
-                      <div className="text-xs font-semibold tracking-[0.28em] text-amber-200/80">WINNERS</div>
-                      <div className="mt-1 flex max-w-[84vw] flex-wrap justify-center gap-x-3 gap-y-1 text-base text-amber-100/90 md:text-xl">
+                    <div className="mt-4">
+                      <div className="text-sm font-semibold tracking-[0.5em] text-pit-text-dim">WINNERS_LIST</div>
+                      <div className="mt-2 flex max-w-[84vw] flex-wrap justify-center gap-x-6 gap-y-2 text-xl text-pit-text-main md:text-2xl">
                         {bingoAnnounce.names.slice(1, 5).map((name, idx) => (
-                          <span key={idx} className="max-w-[18ch] truncate">
+                          <span key={idx} className="max-w-[18ch] truncate text-glow">
                             {name}
                           </span>
                         ))}
                         {(() => {
                           const shownOthers = Math.min(4, Math.max(0, bingoAnnounce.names.length - 1));
                           const remaining = Math.max(0, bingoAnnounce.names.length - 1 - shownOthers);
-                          return remaining > 0 ? <span className="text-amber-200/80">ほか {remaining}名</span> : null;
+                          return remaining > 0 ? <span className="text-pit-text-dim">+ {remaining} OTHERS</span> : null;
                         })()}
                       </div>
                     </div>
@@ -596,7 +618,7 @@ export default function DisplayPage() {
               )}
               {(() => {
                 const count = bingoFx?.count ?? (bingoAnnounce ? bingoAnnounce.names.length : 0);
-                return count > 1 ? <div className="mt-1 text-sm text-amber-200/80">+{count}</div> : null;
+                return count > 1 ? <div className="mt-2 text-xl text-pit-primary font-bold">+{count}</div> : null;
               })()}
             </div>
           </div>
@@ -609,28 +631,28 @@ export default function DisplayPage() {
           overlayVisible ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
-        <div className="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-950/50 px-3 py-2 text-xs text-neutral-200">
-          <span className="font-mono">{code}</span>
-          <span className="text-neutral-500">/</span>
+        <div className="flex items-center gap-2 border border-pit-border bg-pit-bg/90 px-3 py-2 text-xs text-pit-text-main shadow-lg">
+          <span className="font-mono text-pit-primary">{code}</span>
+          <span className="text-pit-text-dim">::</span>
           <span className="font-mono">{screen}</span>
         </div>
         <WsStatusPill status={status} />
-        <Button onClick={goFullscreen} size="sm" variant="secondary">
-          全画面
+        <Button onClick={goFullscreen} size="sm" variant="secondary" className="rounded-none font-mono">
+          FULLSCREEN
         </Button>
       </div>
 
       {status !== "connected" && (
         <div className="fixed bottom-4 left-4 z-50">
-          <WsStatusPill status={status} className="px-4 py-2 text-sm" />
+          <WsStatusPill status={status} className="px-4 py-2 text-sm rounded-none" />
         </div>
       )}
 
-      {!connected && <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 text-xs text-neutral-300">RECONNECTING…</div>}
+      {!connected && <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 text-xs text-pit-danger animate-pulse">SIGNAL LOST / RECONNECTING...</div>}
 
       {fxEnabled && connected && isSpinning && typeof reachCount === "number" && (
-        <div className="fixed right-4 top-4 z-50 rounded-full border border-neutral-800 bg-neutral-950/40 px-4 py-2 text-xs font-semibold text-neutral-100">
-          REACH x{reachCount}
+        <div className="fixed right-4 top-4 z-50 border border-pit-danger bg-pit-bg/90 px-4 py-2 text-xs font-bold text-pit-danger animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]">
+          REACH_ALERT :: {reachCount}
         </div>
       )}
 
@@ -642,41 +664,41 @@ export default function DisplayPage() {
           </aside>
         ) : (
           <aside className="grid gap-4 lg:order-1">
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-500">統計（コア）</div>
-              <div className="mt-3 grid gap-2 text-sm text-neutral-200">
+            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+              <div className="text-xs text-pit-text-muted">CORE_STATS</div>
+              <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
                 <div>
-                  draw: <span className="font-mono text-neutral-50">{view?.drawCount ?? "—"}</span> / 75
+                  DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
                 </div>
                 <div>
-                  reach: <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span>
+                  REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
                 </div>
                 <div>
-                  bingo: <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
+                  BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
                 </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-500">直近</div>
+            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+              <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
-                  <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
                     {n}
                   </div>
                 ))}
-                {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+                {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
               </div>
             </div>
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-500">スポットライト</div>
-              <div className="mt-2 text-sm text-neutral-300">
+            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+              <div className="text-xs text-pit-text-muted">SPOTLIGHT_META</div>
+              <div className="mt-2 text-sm text-pit-text-dim">
                 v{fmtNum(view?.spotlight?.version)} / {view?.spotlight?.updatedBy ?? "—"} /{" "}
                 {view?.spotlight?.updatedAt ? relativeFromNow(view.spotlight.updatedAt) : "—"}
               </div>
               <div className="mt-3 grid gap-2">
                 {sidePlayers.map((p, idx) => (
-                  <div key={idx} className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm text-neutral-200">
-                    {p?.displayName ?? "（未選択）"}
+                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-2 text-sm text-pit-text-main">
+                    {p?.displayName ?? "VOID_SLOT"}
                   </div>
                 ))}
               </div>
@@ -690,51 +712,53 @@ export default function DisplayPage() {
             <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
                 <div
                   className={cn(
-                    "relative isolate overflow-hidden rounded-[2.75rem] border p-[1.8vw]",
-                    "border-neutral-800/70 bg-neutral-950/35 shadow-[0_0_140px_rgba(0,0,0,0.70)]",
+                    "relative isolate overflow-hidden border p-[1.8vw]",
+                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
                     fxActive && !safeMode && !isSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
-                    isSpinning && "border-amber-700/25 shadow-[0_0_140px_rgba(234,179,8,0.10)]",
-                    fxActive && isLastSpinning && visualReachIntensity > 0 && "border-amber-500/35 shadow-[0_0_180px_rgba(234,179,8,0.12)]",
-                    readableBoost && "bg-neutral-950/60",
+                    isSpinning && "border-pit-primary/50 shadow-[0_0_140px_rgba(234,179,8,0.3)]",
+                    fxActive && isLastSpinning && visualReachIntensity > 0 && "border-pit-danger/50 shadow-[0_0_180px_rgba(239,68,68,0.3)]",
+                    readableBoost && "bg-black/90",
                   )}
                 >
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-white/0 to-transparent opacity-70" />
-                <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]" />
-
+                <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)50%,rgba(0,0,0,0.25)50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20" />
+                
                 {goPulse && fxActive && !safeMode && (
-                  <div className="pointer-events-none absolute inset-0 animate-[clover-go_560ms_ease-out] rounded-[2.75rem] ring-2 ring-amber-400/30" />
+                  <div className="pointer-events-none absolute inset-0 animate-[clover-go_560ms_ease-out] border-4 border-pit-primary" />
                 )}
                 {confirmedPulse && fxActive && !safeMode && (
-                  <div className="pointer-events-none absolute inset-0 animate-[clover-confirm_180ms_ease-out] rounded-[2.75rem] ring-2 ring-emerald-300/25" />
+                  <div className="pointer-events-none absolute inset-0 animate-[clover-confirm_180ms_ease-out] border-4 border-emerald-500" />
                 )}
 
                 <div
                   className={cn(
-                    "relative z-10 font-black tabular-nums tracking-tight",
+                    "relative z-10 font-black tabular-nums tracking-tight font-header",
                     "text-[min(92vw,88vh)] leading-none",
                     isSpinning
-                      ? "text-amber-200 drop-shadow-[0_0_70px_rgba(234,179,8,0.22)]"
-                      : "text-neutral-50 drop-shadow-[0_0_40px_rgba(255,255,255,0.10)]",
-                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.2px]" : "blur-[0.8px]"),
+                      ? "text-pit-primary drop-shadow-[0_0_20px_rgba(234,179,8,0.8)]"
+                      : "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
+                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
                   )}
                 >
                   {shownDigit ?? "?"}
                 </div>
 
                 {fxEnabled && readableBoost && (
-                  <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-full border border-neutral-700/50 bg-neutral-950/60 px-3 py-1 text-xs font-semibold text-neutral-100">
-                    CONFIRMED
+                  <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 border border-pit-secondary bg-black/80 px-4 py-1 text-sm font-bold text-pit-secondary tracking-[0.2em] shadow-[0_0_10px_rgba(16,185,129,0.5)]">
+                    LOCKED
                   </div>
                 )}
               </div>
             </div>
-            <div className="mt-2 text-sm text-neutral-400">
-              reel: <span className="text-neutral-200">{view?.reel.status ?? "idle"}</span> / last:{" "}
-              <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
+            <div className="mt-4 text-sm font-mono text-pit-text-dim tracking-wider">
+              REEL_STATUS ::{" "}
+              <span className={cn("text-pit-text-main", view?.reel.status === "spinning" ? "text-pit-primary animate-pulse" : "")}>
+                {(view?.reel?.status ?? "idle").toUpperCase()}
+              </span>{" "}
+              <span className="mx-2">|</span> LAST_IDX :: <span className="font-mono text-pit-text-main">{view?.lastNumber ?? "—"}</span>
             </div>
             {view?.sessionStatus === "ended" && (
-              <div className="mt-4 rounded-lg border border-amber-800/60 bg-amber-950/30 p-3 text-sm text-amber-200">
-                セッションは終了しました。
+              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
+                SESSION_TERMINATED
               </div>
             )}
           </div>
@@ -743,46 +767,46 @@ export default function DisplayPage() {
         {/* Inner side: stats core / spotlight */}
         {screen === "ten" ? (
           <aside className="grid gap-4 lg:order-3">
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-500">統計（コア）</div>
-              <div className="mt-3 grid gap-2 text-sm text-neutral-200">
+            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+              <div className="text-xs text-pit-text-muted">CORE_STATS</div>
+              <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
                 <div>
-                  draw: <span className="font-mono text-neutral-50">{view?.drawCount ?? "—"}</span> / 75
+                  DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
                 </div>
                 <div>
-                  reach: <span className="font-mono text-neutral-50">{view?.stats?.reachPlayers ?? "—"}</span>
+                  REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
                 </div>
                 <div>
-                  bingo: <span className="font-mono text-neutral-50">{view?.stats?.bingoPlayers ?? "—"}</span>
+                  BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
                 </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-500">直近</div>
+            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+              <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
-                  <div key={idx} className="rounded-full border border-neutral-800 bg-neutral-950/40 px-3 py-1 text-sm font-mono text-neutral-200">
+                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
                     {n}
                   </div>
                 ))}
-                {!view?.lastNumbers?.length && <div className="text-sm text-neutral-400">—</div>}
+                {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
               </div>
             </div>
             {emptySlots > 0 && (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-                <div className="text-xs text-neutral-500">統計（詳細）</div>
-                <div className="mt-2 grid gap-1 text-sm text-neutral-300">
+              <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+                <div className="text-xs text-pit-text-muted">STATS_DETAIL_DUMP</div>
+                <div className="mt-2 grid gap-1 text-sm text-pit-text-dim">
                   <div>
-                    0手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
+                    [0]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
                   </div>
                   <div>
-                    1手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
+                    [1]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
                   </div>
                   <div>
-                    2手: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
+                    [2]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
                   </div>
                   <div>
-                    3+: <span className="font-mono text-neutral-200">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
+                    [3+]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
                   </div>
                 </div>
               </div>
@@ -793,6 +817,7 @@ export default function DisplayPage() {
             {sideCards}
           </aside>
         )}
+      </div>
       </div>
     </main>
   );
