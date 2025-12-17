@@ -159,6 +159,14 @@ function clampDisplayName(input: unknown): string | null {
   return trimmed;
 }
 
+function clampDeviceId(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed.length < 8) return null;
+  if (trimmed.length > 64) return trimmed.slice(0, 64);
+  return trimmed;
+}
+
 function clampSpotlightUpdatedBy(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
@@ -406,9 +414,18 @@ export class SessionDurableObject {
         this.pendingDraw && this.pendingDraw.reel[screen] === "stopped"
           ? this.pendingDraw.stoppedDigits[screen] ?? digitsOf(this.pendingDraw.number)[screen]
           : lastCommittedDigit;
+      const spotlightPlayersWithCard = this.spotlight.ids
+        .map((id) => this.players[id])
+        .filter(Boolean)
+        .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress, card: p.card }));
       return {
         ...base,
         role: "display",
+        drawnNumbers: this.drawnNumbers,
+        spotlight: {
+          ...base.spotlight,
+          players: spotlightPlayersWithCard,
+        },
         screen,
         reel: {
           status,
@@ -528,20 +545,61 @@ export class SessionDurableObject {
     }
     const displayName = clampDisplayName((body as { displayName?: unknown }).displayName);
     if (!displayName) return textResponse("displayName required", { status: 400 });
+    const deviceId = clampDeviceId((body as { deviceId?: unknown }).deviceId);
+    if (!deviceId) return textResponse("deviceId required", { status: 400 });
+
+    const db = getDb(this.env);
+    const sessionId = this.session!.id;
+
+    // Idempotent join per device: if the same device joins again, reuse the existing card/playerId
+    // and treat it as a displayName update (no duplicate participants from one device).
+    const existingRows = await db
+      .select()
+      .from(participants)
+      .where(and(eq(participants.sessionId, sessionId), eq(participants.deviceId, deviceId)))
+      .limit(1);
+    if (existingRows.length) {
+      const existing = existingRows[0];
+      await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
+      const cached = this.players[existing.id];
+      if (cached) cached.displayName = displayName;
+      this.touch();
+      this.broadcastSnapshots();
+      return jsonResponse({ ok: true, playerId: existing.id, mode: "updated" });
+    }
 
     const playerId = crypto.randomUUID();
     const createdAt = isoNow();
     const card = generate75BallCard();
     const progress = evaluateCard(card, this.drawnNumbers);
 
-    const db = getDb(this.env);
-    await db.insert(participants).values({
-      id: playerId,
-      sessionId: this.session!.id,
-      displayName,
-      cardJson: JSON.stringify(card),
-      createdAt,
-    });
+    try {
+      await db.insert(participants).values({
+        id: playerId,
+        sessionId,
+        deviceId,
+        displayName,
+        cardJson: JSON.stringify(card),
+        createdAt,
+      });
+    } catch {
+      // Race: another tab/device might have inserted first. Re-fetch and reuse.
+      const retryRows = await db
+        .select()
+        .from(participants)
+        .where(and(eq(participants.sessionId, sessionId), eq(participants.deviceId, deviceId)))
+        .limit(1);
+      if (retryRows.length) {
+        const existing = retryRows[0];
+        await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
+        const cached = this.players[existing.id];
+        if (cached) cached.displayName = displayName;
+        this.touch();
+        this.broadcastSnapshots();
+        return jsonResponse({ ok: true, playerId: existing.id, mode: "updated" });
+      }
+      return textResponse("failed to create participant", { status: 500 });
+    }
 
     this.players[playerId] = {
       id: playerId,
@@ -559,6 +617,7 @@ export class SessionDurableObject {
       playerId,
       card,
       progress,
+      mode: "created",
     });
   }
 
@@ -605,6 +664,7 @@ export class SessionDurableObject {
       newBingoCount += 1;
       newBingoIds.push(id);
     }
+    const newBingoNames = newBingoIds.map((id) => this.players[id]?.displayName ?? id);
 
     const seq = this.drawnNumbers.length;
     const stats = computeSessionStats(Object.values(this.players).map((p) => p.progress));
@@ -625,7 +685,8 @@ export class SessionDurableObject {
     this.touch();
 
     const baseEvent = { type: "draw.committed" as const, seq, number, committedAt, stats };
-    this.broadcastEvent((a) => a?.role === "participant" || a?.role === "display", baseEvent);
+    this.broadcastEvent((a) => a?.role === "participant", baseEvent);
+    this.broadcastEvent((a) => a?.role === "display", newBingoNames.length ? { ...baseEvent, newBingoNames } : baseEvent);
     this.broadcastEvent(
       (a) => a?.role === "admin" || a?.role === "mod",
       newBingoIds.length ? { ...baseEvent, newBingoIds } : baseEvent,
@@ -752,6 +813,27 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true, status: "ended", endedAt });
   }
 
+  private async handleModEnd(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "mod");
+    if (authError) return authError;
+    if (!this.session) return textResponse("session not found", { status: 404 });
+
+    if (this.session.status === "ended") return jsonResponse({ ok: true, status: "ended" });
+
+    const endedAt = isoNow();
+    const db = getDb(this.env);
+    await db.update(sessions).set({ status: "ended", endedAt }).where(eq(sessions.id, this.session.id));
+
+    this.session.status = "ended";
+    this.session.endedAt = endedAt;
+    this.pendingDraw = null;
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, status: "ended", endedAt });
+  }
+
   private async handleModSpotlight(request: Request): Promise<Response> {
     const loadError = await this.ensureLoaded(request);
     if (loadError) return loadError;
@@ -838,6 +920,7 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/prepare" && request.method === "POST") return this.handleAdminPrepare(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
+    if (url.pathname === "/mod/end" && request.method === "POST") return this.handleModEnd(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);
 
     return textResponse("not found", { status: 404 });

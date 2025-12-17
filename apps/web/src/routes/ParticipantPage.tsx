@@ -15,6 +15,17 @@ export default function ParticipantPage() {
   const params = useParams();
   const code = params.code ?? "";
 
+  function createDeviceId(): string {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      return `dev_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+    }
+  }
+
+  const deviceIdKey = "cloverbingo:deviceId";
+  const [deviceId] = useLocalStorageString(deviceIdKey, createDeviceId());
+
   const playerIdKey = `cloverbingo:player:${code}:id`;
   const nameKey = `cloverbingo:player:${code}:name`;
   const [playerId, setPlayerId] = useLocalStorageString(playerIdKey, "");
@@ -23,6 +34,7 @@ export default function ParticipantPage() {
   const [joinName, setJoinName] = useState(displayName);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinNotice, setJoinNotice] = useState<string | null>(null);
 
   const { snapshot, status } = useSessionSocket({ role: "participant", code, playerId: playerId || undefined });
   const view = useMemo(() => {
@@ -34,19 +46,21 @@ export default function ParticipantPage() {
   async function join() {
     setJoining(true);
     setJoinError(null);
+    setJoinNotice(null);
     try {
       const res = await fetch(`/api/participant/join?code=${encodeURIComponent(code)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayName: joinName }),
+        body: JSON.stringify({ displayName: joinName, deviceId }),
       });
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `join failed (${res.status})`);
       }
-      const json = (await res.json()) as { ok: true; playerId: string };
+      const json = (await res.json()) as { ok: true; playerId: string; mode?: "created" | "updated" };
       setPlayerId(json.playerId);
       setDisplayName(joinName);
+      if (json.mode === "updated") setJoinNotice("この端末は既に参加していたため、表示名を更新しました（カードは引き継ぎです）。");
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -55,6 +69,10 @@ export default function ParticipantPage() {
   }
 
   function resetIdentity() {
+    if (playerId) {
+      const ok = window.confirm("この端末で既に参加しています。名前を変えると参加情報（表示名）が上書きされます。続けますか？");
+      if (!ok) return;
+    }
     setPlayerId("");
     setDisplayName("");
     setJoinName("");
@@ -107,12 +125,20 @@ export default function ParticipantPage() {
                 <Alert variant="danger">参加に失敗: {joinError}</Alert>
               </div>
             )}
+            {joinNotice && (
+              <div className="mt-3">
+                <Alert variant="warning">{joinNotice}</Alert>
+              </div>
+            )}
             <div className="mt-4 text-xs text-neutral-500">※ セッションが未初期化の場合は 404 になります（ローカルはトップで作成）。</div>
           </Card>
         )}
 
         {playerId && (
           <div className="mt-4 grid gap-4">
+            {joinNotice && (
+              <Alert variant="warning">{joinNotice}</Alert>
+            )}
             {view && view.player === null && (
               <Alert variant="warning">
                 参加情報が見つかりませんでした（playerId が無効の可能性があります）。「名前を変える（再参加）」を押してください。

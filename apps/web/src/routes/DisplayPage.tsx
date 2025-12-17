@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import BingoCard from "../components/BingoCard";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import WsStatusPill from "../components/ui/WsStatusPill";
@@ -24,7 +25,10 @@ type DrawCommittedEvent = {
   number: number;
   committedAt: string;
   stats: { bingoPlayers: number };
+  newBingoNames?: string[];
 };
+
+type SpotlightPlayer = DisplaySnapshot["spotlight"]["players"][number];
 
 function safeScreen(input: string | undefined): DisplayScreen | null {
   if (input === "ten" || input === "one") return input;
@@ -44,6 +48,13 @@ function relativeFromNow(ms: number): string {
   if (min < 60) return `${min}分前`;
   const hr = Math.floor(min / 60);
   return `${hr}時間前`;
+}
+
+function randomIntInclusive(min: number, max: number): number {
+  const lo = Math.ceil(Math.min(min, max));
+  const hi = Math.floor(Math.max(min, max));
+  if (hi <= lo) return lo;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
 }
 
 function reachIntensityFromCount(reachCount: number | null | undefined): ReachIntensity {
@@ -67,11 +78,12 @@ function isDrawSpinEvent(ev: unknown): ev is DrawSpinEvent {
 
 function isDrawCommittedEvent(ev: unknown): ev is DrawCommittedEvent {
   if (!ev || typeof ev !== "object") return false;
-  const maybe = ev as { type?: unknown; seq?: unknown; number?: unknown; committedAt?: unknown; stats?: unknown };
+  const maybe = ev as { type?: unknown; seq?: unknown; number?: unknown; committedAt?: unknown; stats?: unknown; newBingoNames?: unknown };
   if (maybe.type !== "draw.committed") return false;
   if (typeof maybe.seq !== "number") return false;
   if (typeof maybe.number !== "number") return false;
   if (typeof maybe.committedAt !== "string") return false;
+  if (typeof maybe.newBingoNames !== "undefined" && !Array.isArray(maybe.newBingoNames)) return false;
   if (!maybe.stats || typeof maybe.stats !== "object") return false;
   const stats = maybe.stats as { bingoPlayers?: unknown };
   if (typeof stats.bingoPlayers !== "number") return false;
@@ -118,11 +130,16 @@ export default function DisplayPage() {
 
   const [bingoFx, setBingoFx] = useState<{ key: number; count: number } | null>(null);
   const bingoFxTimerRef = useRef<number | null>(null);
+  const [bingoAnnounce, setBingoAnnounce] = useState<{ key: number; names: string[]; showNames: boolean } | null>(null);
+  const bingoAnnounceSeqRef = useRef(0);
+  const bingoAnnounceNameTimerRef = useRef<number | null>(null);
+  const bingoAnnounceHideTimerRef = useRef<number | null>(null);
   const prevBingoPlayersRef = useRef<number | null>(null);
   const lastCommittedSeqRef = useRef<number | null>(null);
 
   const [reelSignal, setReelSignal] = useState<Record<ReelDigit, "idle" | "spinning" | "stopped">>({ ten: "idle", one: "idle" });
   const currentSpinIdRef = useRef<number | null>(null);
+  const spotlightCacheRef = useRef<Map<string, SpotlightPlayer>>(new Map());
 
   const screenDigit: ReelDigit = screen === "one" ? "one" : "ten";
   const otherDigit: ReelDigit = screenDigit === "ten" ? "one" : "ten";
@@ -160,6 +177,16 @@ export default function DisplayPage() {
     }
     return list;
   }, [bingoFx, fxActive, safeMode]);
+
+  useEffect(() => {
+    const list = view?.spotlight?.players ?? [];
+    if (!list.length) return;
+    const cache = spotlightCacheRef.current;
+    for (const p of list) {
+      const prev = cache.get(p.id);
+      cache.set(p.id, { ...prev, ...p, card: p.card ?? prev?.card });
+    }
+  }, [view?.spotlight?.players]);
 
   useEffect(() => {
     const mql = typeof window !== "undefined" ? window.matchMedia?.("(prefers-reduced-motion: reduce)") : null;
@@ -212,28 +239,59 @@ export default function DisplayPage() {
       if (readableBoostTimerRef.current) window.clearTimeout(readableBoostTimerRef.current);
       setConfirmedPulse(false);
       setReadableBoost(true);
-      readableBoostTimerRef.current = window.setTimeout(() => setReadableBoost(false), 1100);
+      readableBoostTimerRef.current = window.setTimeout(() => setReadableBoost(false), 900);
 
       if (fxActive && !safeMode) {
         setConfirmedPulse(true);
         confirmedPulseTimerRef.current = window.setTimeout(() => setConfirmedPulse(false), 180);
       }
 
+      bingoAnnounceSeqRef.current += 1;
+      const announceSeq = bingoAnnounceSeqRef.current;
+      if (bingoAnnounceNameTimerRef.current) window.clearTimeout(bingoAnnounceNameTimerRef.current);
+      if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
+      bingoAnnounceNameTimerRef.current = null;
+      bingoAnnounceHideTimerRef.current = null;
+      const newBingoNames = Array.isArray(lastEvent.newBingoNames)
+        ? lastEvent.newBingoNames.filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+        : [];
+      if (newBingoNames.length > 0) {
+        const key = Date.now();
+        setBingoAnnounce({ key, names: newBingoNames, showNames: safeMode });
+
+        const revealDelayMs = safeMode ? 0 : randomIntInclusive(250, 650);
+        if (!safeMode) {
+          bingoAnnounceNameTimerRef.current = window.setTimeout(() => {
+            if (bingoAnnounceSeqRef.current !== announceSeq) return;
+            setBingoAnnounce({ key, names: newBingoNames, showNames: true });
+          }, revealDelayMs);
+        }
+
+        const hideAfterMs = safeMode ? 2200 : 3800;
+        bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
+          if (bingoAnnounceSeqRef.current !== announceSeq) return;
+          setBingoAnnounce(null);
+        }, hideAfterMs);
+      } else {
+        setBingoAnnounce(null);
+      }
+
       const nextBingoPlayers = lastEvent.stats.bingoPlayers;
       const prevBingoPlayers = prevBingoPlayersRef.current;
-      if (typeof nextBingoPlayers === "number") {
-        if (typeof prevBingoPlayers === "number") {
-          const delta = Math.max(0, nextBingoPlayers - prevBingoPlayers);
-          if (delta > 0 && fxEnabled) {
-            if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
-            const key = Date.now();
-            setBingoFx({ key, count: delta });
-            const duration = safeMode ? 1200 : 1900;
-            bingoFxTimerRef.current = window.setTimeout(() => setBingoFx(null), duration);
-          }
-        }
-        prevBingoPlayersRef.current = nextBingoPlayers;
+      const delta =
+        newBingoNames.length > 0
+          ? newBingoNames.length
+          : typeof nextBingoPlayers === "number" && typeof prevBingoPlayers === "number"
+            ? Math.max(0, nextBingoPlayers - prevBingoPlayers)
+            : 0;
+      if (delta > 0 && fxEnabled) {
+        if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
+        const key = Date.now();
+        setBingoFx({ key, count: delta });
+        const duration = safeMode ? 1100 : 1700;
+        bingoFxTimerRef.current = window.setTimeout(() => setBingoFx(null), duration);
       }
+      if (typeof nextBingoPlayers === "number") prevBingoPlayersRef.current = nextBingoPlayers;
     }
   }, [lastEvent, fxActive, fxEnabled, safeMode]);
 
@@ -276,6 +334,8 @@ export default function DisplayPage() {
       if (confirmedPulseTimerRef.current) window.clearTimeout(confirmedPulseTimerRef.current);
       if (readableBoostTimerRef.current) window.clearTimeout(readableBoostTimerRef.current);
       if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
+      if (bingoAnnounceNameTimerRef.current) window.clearTimeout(bingoAnnounceNameTimerRef.current);
+      if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
     };
   }, []);
 
@@ -334,19 +394,20 @@ export default function DisplayPage() {
     );
   }
 
+  const drawnNumbers = view?.drawnNumbers ?? [];
   const spotlightIds = view?.spotlight?.ids ?? [];
   const spotlightPlayers = view?.spotlight?.players ?? [];
-  const playerById = new Map<string, (typeof spotlightPlayers)[number]>();
+  const playerById = new Map<string, SpotlightPlayer>();
   for (const p of spotlightPlayers) playerById.set(p.id, p);
   const sideIds = screen === "ten" ? spotlightIds.slice(0, 3) : spotlightIds.slice(3, 6);
-  const sidePlayers: Array<(typeof spotlightPlayers)[number] | null> = [];
+  const sidePlayers: Array<SpotlightPlayer | null> = [];
   for (let i = 0; i < 3; i += 1) {
     const id = sideIds[i];
     if (!id) {
       sidePlayers.push(null);
       continue;
     }
-    sidePlayers.push(playerById.get(id) ?? null);
+    sidePlayers.push(playerById.get(id) ?? spotlightCacheRef.current.get(id) ?? null);
   }
   const emptySlots = sidePlayers.filter((p) => !p).length;
 
@@ -358,21 +419,28 @@ export default function DisplayPage() {
       sideCards.push(
         <div key={`spotlight:${i}`} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="truncate text-lg font-semibold text-neutral-50">{p.displayName}</div>
+            <div className="truncate text-xl font-semibold text-neutral-50">{p.displayName}</div>
             {p.progress.isBingo && <Badge variant="success">BINGO</Badge>}
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-neutral-300">
+          {p.card ? (
+            <div className="mt-3">
+              <BingoCard card={p.card} drawnNumbers={drawnNumbers} showHeaders={false} className="max-w-none" />
+            </div>
+          ) : (
+            <div className="mt-3 text-sm text-neutral-400">カードなし</div>
+          )}
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-neutral-300">
             <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
               <div className="text-[0.65rem] text-neutral-500">min</div>
-              <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.minMissingToLine}</div>
+              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.minMissingToLine}</div>
             </div>
             <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
               <div className="text-[0.65rem] text-neutral-500">reach</div>
-              <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.reachLines}</div>
+              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.reachLines}</div>
             </div>
             <div className="rounded-lg border border-neutral-800 bg-neutral-950/40 px-2 py-2">
               <div className="text-[0.65rem] text-neutral-500">lines</div>
-              <div className="mt-1 font-mono text-sm text-neutral-100">{p.progress.bingoLines}</div>
+              <div className="mt-1 font-mono text-base text-neutral-100">{p.progress.bingoLines}</div>
             </div>
           </div>
         </div>,
@@ -466,14 +534,25 @@ export default function DisplayPage() {
                 "repeating-linear-gradient(to bottom, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, rgba(0,0,0,0) 3px, rgba(0,0,0,0) 6px)",
             }}
           />
+          <div
+            className={cn(
+              "pointer-events-none fixed inset-0 z-0 mix-blend-overlay",
+              safeMode ? "opacity-[0.02]" : isSpinning ? "opacity-[0.05]" : "opacity-[0.04]",
+            )}
+            style={{
+              backgroundImage:
+                "linear-gradient(to right, rgba(255,255,255,0.06) 1px, rgba(0,0,0,0) 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, rgba(0,0,0,0) 1px)",
+              backgroundSize: "6px 6px",
+            }}
+          />
         </>
       )}
 
       {readableBoost && <div className="pointer-events-none fixed inset-0 z-10 bg-black/35" />}
 
-      {bingoFx && fxEnabled && (
+      {(bingoFx || bingoAnnounce) && (
         <>
-          {!safeMode && fxActive && (
+          {!safeMode && fxActive && fxEnabled && bingoFx && (
             <div className="pointer-events-none fixed inset-0 z-30">
               {bingoParticles.map((p) => (
                 <span key={p.key} className="clover-particle" style={p.style} />
@@ -491,7 +570,34 @@ export default function DisplayPage() {
               <div className="text-3xl font-black tracking-tight text-amber-200 drop-shadow-[0_0_24px_rgba(234,179,8,0.20)] md:text-5xl">
                 BINGO!
               </div>
-              {bingoFx.count > 1 && <div className="mt-1 text-sm text-amber-200/80">+{bingoFx.count}</div>}
+              {bingoAnnounce && bingoAnnounce.showNames && (
+                <>
+                  <div className="mt-2 max-w-[84vw] truncate text-3xl font-semibold text-amber-100 md:text-5xl">
+                    {bingoAnnounce.names[0] ?? "?"}
+                  </div>
+                  {bingoAnnounce.names.length > 1 && (
+                    <div className="mt-2">
+                      <div className="text-xs font-semibold tracking-[0.28em] text-amber-200/80">WINNERS</div>
+                      <div className="mt-1 flex max-w-[84vw] flex-wrap justify-center gap-x-3 gap-y-1 text-base text-amber-100/90 md:text-xl">
+                        {bingoAnnounce.names.slice(1, 5).map((name, idx) => (
+                          <span key={idx} className="max-w-[18ch] truncate">
+                            {name}
+                          </span>
+                        ))}
+                        {(() => {
+                          const shownOthers = Math.min(4, Math.max(0, bingoAnnounce.names.length - 1));
+                          const remaining = Math.max(0, bingoAnnounce.names.length - 1 - shownOthers);
+                          return remaining > 0 ? <span className="text-amber-200/80">ほか {remaining}名</span> : null;
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {(() => {
+                const count = bingoFx?.count ?? (bingoAnnounce ? bingoAnnounce.names.length : 0);
+                return count > 1 ? <div className="mt-1 text-sm text-amber-200/80">+{count}</div> : null;
+              })()}
             </div>
           </div>
         </>
@@ -582,16 +688,16 @@ export default function DisplayPage() {
         <div className={cn("flex items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
           <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
             <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
-              <div
-                className={cn(
-                  "relative isolate overflow-hidden rounded-[2.75rem] border px-[4vw] py-[2vw]",
-                  "border-neutral-800/70 bg-neutral-950/35 shadow-[0_0_140px_rgba(0,0,0,0.70)]",
-                  fxActive && !safeMode && !isSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
-                  isSpinning && "border-amber-700/25 shadow-[0_0_140px_rgba(234,179,8,0.10)]",
-                  fxActive && isLastSpinning && visualReachIntensity > 0 && "border-amber-500/35 shadow-[0_0_180px_rgba(234,179,8,0.12)]",
-                  readableBoost && "bg-neutral-950/60",
-                )}
-              >
+                <div
+                  className={cn(
+                    "relative isolate overflow-hidden rounded-[2.75rem] border p-[1.8vw]",
+                    "border-neutral-800/70 bg-neutral-950/35 shadow-[0_0_140px_rgba(0,0,0,0.70)]",
+                    fxActive && !safeMode && !isSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
+                    isSpinning && "border-amber-700/25 shadow-[0_0_140px_rgba(234,179,8,0.10)]",
+                    fxActive && isLastSpinning && visualReachIntensity > 0 && "border-amber-500/35 shadow-[0_0_180px_rgba(234,179,8,0.12)]",
+                    readableBoost && "bg-neutral-950/60",
+                  )}
+                >
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/10 via-white/0 to-transparent opacity-70" />
                 <div className="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]" />
 
@@ -605,7 +711,7 @@ export default function DisplayPage() {
                 <div
                   className={cn(
                     "relative z-10 font-black tabular-nums tracking-tight",
-                    "text-[42vw] leading-none md:text-[26vw]",
+                    "text-[min(92vw,88vh)] leading-none",
                     isSpinning
                       ? "text-amber-200 drop-shadow-[0_0_70px_rgba(234,179,8,0.22)]"
                       : "text-neutral-50 drop-shadow-[0_0_40px_rgba(255,255,255,0.10)]",

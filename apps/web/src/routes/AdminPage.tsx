@@ -22,11 +22,22 @@ const BGM_TRACKS = [
 ] as const;
 type BgmTrackFile = (typeof BGM_TRACKS)[number]["file"];
 
+// Ducking: reduce BGM while any SFX is active. "75%" here means ~75% reduction (i.e. keep 25% volume).
+const DUCKING_GAIN = 0.25;
+
+// Trim trailing silence (measured with ffmpeg silencedetect) to avoid long dead-air at track ends.
+const BGM_TRIM: Record<BgmTrackFile, { endSec: number }> = {
+  "OstCredits.ogg": { endSec: 94.626009 },
+  "OstDemoTrailer.ogg": { endSec: 58.917619 },
+  "OstReleaseTrailer.ogg": { endSec: 74.309206 },
+};
+
 type AudioRig = {
   bgm: HTMLAudioElement;
   bgmPlaylist: readonly BgmTrackFile[];
   bgmIndex: number;
   bgmOnEnded: (() => void) | null;
+  bgmTrimTimer: number | null;
   bgmBaseVolume: number;
   duckCount: number;
   fanfareLoopTimer: number | null;
@@ -171,8 +182,10 @@ export default function AdminPage() {
   const [enterError, setEnterError] = useState<string | null>(null);
   const [enterToken, setEnterToken] = useState(inviteToken);
 
-  const [bgmVolume, setBgmVolume] = useLocalStorageString("cloverbingo:admin:bgmVolume", "0.35");
+  const [bgmVolume, setBgmVolume] = useLocalStorageString("cloverbingo:admin:bgmVolume", "0.45");
   const bgmVolumeValue = useMemo(() => clamp01(Number.parseFloat(bgmVolume)), [bgmVolume]);
+  const [sfxVolume, setSfxVolume] = useLocalStorageString("cloverbingo:admin:sfxVolume", "0.75");
+  const sfxVolumeValue = useMemo(() => clamp01(Number.parseFloat(sfxVolume)), [sfxVolume]);
 
   const [audioEnabled, setAudioEnabled] = useState(false);
   const audioRef = useRef<AudioRig | null>(null);
@@ -279,7 +292,14 @@ export default function AdminPage() {
   }, [code]);
 
   function syncBgmVolume(aud: AudioRig) {
-    aud.bgm.volume = aud.duckCount > 0 ? aud.bgmBaseVolume * 0.5 : aud.bgmBaseVolume;
+    aud.bgm.volume = aud.duckCount > 0 ? aud.bgmBaseVolume * DUCKING_GAIN : aud.bgmBaseVolume;
+  }
+
+  function syncSfxVolume(aud: AudioRig, volume: number) {
+    const v = clamp01(volume);
+    for (const clip of Object.values(aud.sfx)) {
+      clip.volume = v;
+    }
   }
 
   function duckStart(aud: AudioRig) {
@@ -352,13 +372,31 @@ export default function AdminPage() {
     }, 120);
   }
 
+  function scheduleBgmTrim(aud: AudioRig) {
+    if (aud.bgmTrimTimer) window.clearTimeout(aud.bgmTrimTimer);
+    aud.bgmTrimTimer = null;
+
+    const file = aud.bgmPlaylist[aud.bgmIndex];
+    const trimEnd = BGM_TRIM[file]?.endSec;
+    if (!trimEnd) return;
+
+    const remainingMs = Math.max(0, Math.floor((trimEnd - aud.bgm.currentTime) * 1000));
+    aud.bgmTrimTimer = window.setTimeout(() => {
+      if (audioRef.current !== aud) return;
+      aud.bgmTrimTimer = null;
+      if (!aud.bgmOnEnded) return;
+      aud.bgmOnEnded();
+    }, remainingMs);
+  }
+
   useEffect(() => {
     if (!audioEnabled) return;
     const aud = audioRef.current;
     if (!aud) return;
     aud.bgmBaseVolume = bgmVolumeValue;
     syncBgmVolume(aud);
-  }, [audioEnabled, bgmVolumeValue]);
+    syncSfxVolume(aud, sfxVolumeValue);
+  }, [audioEnabled, bgmVolumeValue, sfxVolumeValue]);
 
   useEffect(() => {
     if (!audioEnabled) return;
@@ -470,6 +508,8 @@ export default function AdminPage() {
       const aud = audioRef.current;
       if (!aud) return;
       stopFanfare(aud);
+      if (aud.bgmTrimTimer) window.clearTimeout(aud.bgmTrimTimer);
+      aud.bgmTrimTimer = null;
       if (aud.bgmOnEnded) {
         aud.bgm.removeEventListener("ended", aud.bgmOnEnded);
         aud.bgm.removeEventListener("error", aud.bgmOnEnded);
@@ -487,12 +527,14 @@ export default function AdminPage() {
       const playlist = BGM_TRACKS.map((t) => t.file);
       const bgm = new Audio(`/bgm/${playlist[0]}`);
       bgm.loop = false;
+      bgm.preload = "auto";
 
       const rig: AudioRig = {
         bgm,
         bgmPlaylist: playlist,
         bgmIndex: 0,
         bgmOnEnded: null,
+        bgmTrimTimer: null,
         bgmBaseVolume: bgmVolumeValue,
         duckCount: 0,
         fanfareLoopTimer: null,
@@ -510,14 +552,7 @@ export default function AdminPage() {
         },
       };
 
-      rig.sfx.coinDeposit.volume = 1.0;
-      rig.sfx.startupJingle.volume = 1.0;
-      rig.sfx.fanfare.volume = 1.0;
-      rig.sfx.scored.volume = 1.0;
-      rig.sfx.scoredWithJackpot.volume = 1.0;
-      rig.sfx.spinWin.volume = 1.0;
-      rig.sfx.jackpot.volume = 1.0;
-      rig.sfx.longStreakEnd.volume = 1.0;
+      syncSfxVolume(rig, sfxVolumeValue);
 
       rig.bgmOnEnded = () => {
         if (audioRef.current !== rig) return;
@@ -528,6 +563,7 @@ export default function AdminPage() {
         void rig.bgm.play().catch(() => {
           // ignore
         });
+        scheduleBgmTrim(rig);
       };
       rig.bgm.addEventListener("ended", rig.bgmOnEnded);
       rig.bgm.addEventListener("error", rig.bgmOnEnded);
@@ -538,6 +574,7 @@ export default function AdminPage() {
       // Unlock audio on user gesture
       syncBgmVolume(rig);
       await rig.bgm.play();
+      scheduleBgmTrim(rig);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to enable audio");
       setAudioEnabled(false);
@@ -635,8 +672,15 @@ export default function AdminPage() {
                     <input type="range" min={0} max={1} step={0.05} value={bgmVolumeValue} onChange={(e) => setBgmVolume(e.target.value)} />
                     <div className="w-10 text-right font-mono text-neutral-200">{bgmVolumeValue.toFixed(2)}</div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-neutral-500">SFX</div>
+                    <input type="range" min={0} max={1} step={0.05} value={sfxVolumeValue} onChange={(e) => setSfxVolume(e.target.value)} />
+                    <div className="w-10 text-right font-mono text-neutral-200">{sfxVolumeValue.toFixed(2)}</div>
+                  </div>
                   <div className="text-neutral-500">ducking</div>
-                  <div className="font-mono text-neutral-200">50%</div>
+                  <div className="font-mono text-neutral-200">75%</div>
+                  <div className="text-neutral-500">trim</div>
+                  <div className="font-mono text-neutral-200">tail</div>
                 </div>
               </div>
             )}

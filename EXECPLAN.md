@@ -53,6 +53,13 @@
 - [x] (2025-12-16 21:27Z) `DESING.md` を反映: 会場表示（ten/one）の演出/UI を強化し、`?fx=0` / `?safe=1` / `prefers-reduced-motion` で抑制できるようにした。
 - [x] (2025-12-16 21:27Z) GO→確定のテンポを `reachCount` 段階で制御し、総尺上限（3.0s/3.6s/4.2s/4.8s）を守るようにした（`DESING.md` 3.2.1）。
 - [x] (2025-12-17 02:01Z) デプロイ実運用に合わせ、FreeプランのDO制約（`new_sqlite_classes`）と SPA ルートの 404 回避（assets の `not_found_handling`）を反映し、さらに `account_id` / `database_id` を `wrangler.local.toml`（gitignore）へ分離して GitHub へ push 可能にした。
+- [x] (2025-12-17 04:30Z) 会場表示: 新規BINGO発生時に当該参加者の表示名を ten/one に表示する（DOがdisplayへ `draw.committed.newBingoNames` を送り、Display UIが 3.5.2 のタイムラインに沿って winnerNames を表示する）。
+- [x] (2025-12-17 04:30Z) 会場表示: スポットライト枠にビンゴカードを表示し、抽選演出中も表示が消えない（DOのdisplay snapshotに `drawnNumbers` と spotlightの `card` を含め、Display UIはカードを描画しつつ id→player をキャッシュして保持する）。
+- [x] (2025-12-17 04:30Z) 会場表示: 数字/統計/スポットライトの文字・要素サイズを遠距離視認向けに拡大し、レイアウトを詰める（数字の `md:` 縮小を撤廃して画面占有率を上げ、スポットライト側もカード中心に再構成）。
+- [x] (2025-12-17 04:30Z) 参加者: 同一端末からの複数参加は最終参加のみ有効にする（重複を作らない）。上書き（表示名更新など）時は警告を出す（D1に `participants.device_id` + unique index、Participant UIで `deviceId` を送信し、更新時に警告を出す）。
+- [x] (2025-12-17 04:30Z) Mod: Mod 側からセッションを終了（消す）できるようにする（運用上の保険。end後は全操作無効）（`POST /api/mod/end` + DO `/mod/end` + Mod UI の End ボタン）。
+- [x] (2025-12-17 04:30Z) Admin音響: BGM の無音を詰める（できるだけギャップを減らす）、ducking を強め（目安 75%）、SFX/BGM の音量感を合わせる（BGM末尾の無音をタイマーでスキップし、ducking 75% + SFX音量スライダーを追加）。
+- [x] (2025-12-17 04:30Z) 会場表示: 演出のタメやエフェクトを詰め、全体の表示を PS1 風（ローポリ/ピクセル寄り）の質感に少し寄せる（視認性は維持）（デジタル格子の薄いオーバーレイ、BINGO名タイムライン、確定後の読みやすさ強調時間などを調整）。
 
 ## Surprises & Discoveries
 
@@ -182,6 +189,8 @@ Admin の音響仕様（このExecPlanでの合意）:
 
 フル要件に向けて、永続化（D1）と運用安全策（招待URLの安全化、end、復帰同期）を先に固めます。次に SessionDO を commitログ中心で復元できるように刷新し、WebSocketプロトコル（snapshot + 必要イベント）を role ごとに配信します。その上で Web UI（参加者/Admin/Mod/会場表示）を要件に沿って強化し、最後にテスト（ロジック/復元）と負荷確認（WS 200接続）を追加します。
 
+追加の運用フィードバック（会場実機）対応として、(1) 会場表示の視認性とレイアウト（数字最大化/テキスト拡大/PS1寄せ）、(2) スポットライトのカード表示と保持、(3) 新規BINGO名の会場表示、(4) 端末重複参加の抑止、(5) Mod 側のセッション終了、(6) 音響の詰め（無音トリム/ducking/音量バランス）を反映します。これらはサーバ（DO/WS/DB）と Web（Display/Participant/Mod/Admin）の両方に跨るため、まずプロトコルと永続化（必要ならD1 migration）を固め、次に各画面のUXを詰めます。
+
 実装の順序（高リスクから潰す）:
 
 1. D1 schema + migration（sessions/invites/participants/draw_commits）
@@ -237,7 +246,12 @@ Admin の音響仕様（このExecPlanでの合意）:
 - UI/UX: Modページは参加者全員のカードをグリッドで一覧監視でき、★でスポットライト下書きを編集できる。
 - UI/UX: 会場表示は遠距離でも読める大きさ/コントラストを維持し、常時表示する情報（オーバーレイ）は最小限に抑える。
 - UI/UX: 会場表示の演出は `DESING.md` の受け入れチェックを満たし、`?fx=0` / `?safe=1` / `prefers-reduced-motion` で段階的に抑制できる（当日保険）。
+- UI/UX: 会場表示（ten/one）は数字が画面いっぱいに近いサイズで表示され、スポットライトは「ビンゴカード＋名前」を表示し、抽選中も消えない。
+- UI/UX: 新規BINGOが発生したら、会場表示に表示名を出せる（少なくとも直近のBINGOが観客に伝わる）。
+- 参加者: 同一端末（同一ブラウザ想定）から重複参加が増殖しない（基本は同一カードのまま表示名更新にする）。更新は警告導線を挟む。
+- Mod: Mod 側にもセッション終了操作があり、終了後は全UI/WSが「終了」を表示し操作不能になる。
 - Admin 音響: BGM が常時ループし、SE 再生中のみ BGM 音量が 50% になる。SE は上記のトリガーに従って鳴る（prepareシーケンス、spinning中の7秒ループ、桁stop、commit後の開放人数表示、新規BINGO、複数BINGOの名前表示完了）。
+- Admin 音響: BGM は無音ギャップをできるだけ減らし、ducking を強め（目安 75%）、SFX と BGM の音量感が極端にズレない。
 
 ## Idempotence and Recovery
 

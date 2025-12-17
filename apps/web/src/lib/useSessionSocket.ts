@@ -26,12 +26,14 @@ export type Player = {
   progress: BingoProgress;
 };
 
+export type SpotlightPlayerSummary = Pick<Player, "id" | "displayName" | "progress" | "card">;
+
 export type SpotlightSnapshot = {
   version: number;
   ids: string[];
   updatedAt: number;
   updatedBy: string | null;
-  players: Array<Pick<Player, "id" | "displayName" | "progress">>;
+  players: SpotlightPlayerSummary[];
 };
 
 export type ParticipantSnapshot = {
@@ -64,6 +66,7 @@ export type DisplaySnapshot = {
   drawState: DrawState;
   lastNumber: number | null;
   lastNumbers: number[];
+  drawnNumbers: number[];
   stats: SessionStats;
   spotlight: SpotlightSnapshot;
   screen: DisplayScreen;
@@ -127,7 +130,15 @@ export type Snapshot =
 export type ServerEvent =
   | { type: "draw.prepared"; number: number; preparedAt: number; impact: { reachPlayers: number; bingoPlayers: number } }
   | { type: "draw.spin"; action: "start" | "stop"; digit: "ten" | "one"; at: number; digitValue?: number }
-  | { type: "draw.committed"; seq: number; number: number; committedAt: string; stats: SessionStats; newBingoIds?: string[] }
+  | {
+      type: "draw.committed";
+      seq: number;
+      number: number;
+      committedAt: string;
+      stats: SessionStats;
+      newBingoIds?: string[];
+      newBingoNames?: string[];
+    }
   | { type: "spotlight.changed"; spotlight: SpotlightSnapshot }
   | { type: "pong"; t: number }
   | { type: string; [k: string]: unknown };

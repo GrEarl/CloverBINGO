@@ -249,6 +249,14 @@ app.post("/api/mod/spotlight", async (c) => {
   return forwardToSession(c, session, "/mod/spotlight");
 });
 
+app.post("/api/mod/end", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/mod/end");
+});
+
 app.post("/api/dev/create-session", async (c) => {
   const reqUrl = new URL(c.req.raw.url);
   if (!isLocalhost(reqUrl.hostname)) return c.text("not found", 404);

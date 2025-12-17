@@ -56,6 +56,7 @@ export default function ModPage() {
 
   const [draft, setDraft] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didInitDraft = useRef(false);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
@@ -145,6 +146,21 @@ export default function ModPage() {
     }
   }
 
+  async function endSession() {
+    if (!view) return;
+    if (view.sessionStatus !== "active") return;
+    if (!window.confirm("セッションを終了します。以後、全操作は無効になります。よろしいですか？")) return;
+    setEnding(true);
+    setError(null);
+    try {
+      await postJson(`/api/mod/end?code=${encodeURIComponent(code)}`, {});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setEnding(false);
+    }
+  }
+
   return (
     <main className="min-h-dvh bg-neutral-950 text-neutral-50">
       <div className="mx-auto max-w-5xl px-6 py-10">
@@ -158,21 +174,30 @@ export default function ModPage() {
               <WsStatusPill status={status} />
               <div className="text-xs text-neutral-500">スポットライトは「下書き→送信」の2段階（最大6人）。</div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-              <div>更新者名</div>
-              <Input
-                className="w-44 py-1 text-xs"
-                placeholder="例: MC-A"
-                value={operatorName}
-                onChange={(e) => setOperatorName(e.target.value)}
-              />
-              <div className="text-neutral-600">表示: {effectiveUpdatedBy || "?"}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                <div>更新者名</div>
+                <Input
+                  className="w-44 py-1 text-xs"
+                  placeholder="例: MC-A"
+                  value={operatorName}
+                  onChange={(e) => setOperatorName(e.target.value)}
+                />
+                <div className="text-neutral-600">表示: {effectiveUpdatedBy || "?"}</div>
+              </div>
             </div>
-          </div>
           <div className="text-xs text-neutral-500">
-            players: <span className="font-mono text-neutral-200">{players.length}</span> / shown:{" "}
-            <span className="font-mono text-neutral-200">{filteredPlayers.length}</span> / last:{" "}
-            <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
+            <div>
+              players: <span className="font-mono text-neutral-200">{players.length}</span> / shown:{" "}
+              <span className="font-mono text-neutral-200">{filteredPlayers.length}</span> / last:{" "}
+              <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
+            </div>
+            {view && (
+              <div className="mt-3 flex justify-end">
+                <Button disabled={ending || view.sessionStatus !== "active"} onClick={() => void endSession()} size="sm" variant="destructive">
+                  {ending ? "終了中..." : "セッション終了"}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
