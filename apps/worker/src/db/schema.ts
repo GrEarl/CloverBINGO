@@ -34,14 +34,19 @@ export const participants = sqliteTable(
     id: text("id").primaryKey(),
     sessionId: text("session_id").notNull(),
     deviceId: text("device_id"),
+    status: text("status").notNull(), // active | disabled
     displayName: text("display_name").notNull(),
     cardJson: text("card_json").notNull(),
     createdAt: text("created_at").notNull(),
+    disabledAt: text("disabled_at"),
+    disabledReason: text("disabled_reason"),
+    disabledBy: text("disabled_by"),
   },
   (t) => ({
     sessionIdIdx: index("participants_session_id_idx").on(t.sessionId),
     sessionDeviceUq: uniqueIndex("participants_session_device_uq").on(t.sessionId, t.deviceId),
     sessionDeviceIdx: index("participants_session_device_idx").on(t.sessionId, t.deviceId),
+    sessionStatusIdx: index("participants_session_status_idx").on(t.sessionId, t.status),
   }),
 );
 

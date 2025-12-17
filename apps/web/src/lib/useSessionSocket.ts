@@ -18,10 +18,16 @@ export type SessionStats = {
   minMissingHistogram: { "0": number; "1": number; "2": number; "3plus": number };
 };
 
+export type PlayerStatus = "active" | "disabled";
+
 export type Player = {
   id: string;
+  status: PlayerStatus;
   displayName: string;
   joinedAt: number;
+  disabledAt?: number | null;
+  disabledReason?: string | null;
+  disabledBy?: string | null;
   card?: number[][];
   progress: BingoProgress;
 };

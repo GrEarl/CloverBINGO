@@ -39,6 +39,11 @@ export default function InvitePage() {
   const [entering, setEntering] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const okInfo = useMemo(() => {
+    if (!info || info.ok !== true) return null;
+    return info;
+  }, [info]);
+
   useEffect(() => {
     let disposed = false;
     async function run() {
@@ -126,14 +131,14 @@ export default function InvitePage() {
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button
-              disabled={entering || !token || info?.ok !== true}
+              disabled={entering || !token || !okInfo || okInfo.sessionStatus !== "active"}
               onClick={() => void enter()}
               variant="primary"
             >
               {entering ? "入室中..." : "入室"}
             </Button>
-            {info?.ok === true && info.sessionStatus !== "active" && (
-              <Alert variant="warning">このセッションは無効化/終了しています（Mod から復帰できます）。</Alert>
+            {okInfo && okInfo.sessionStatus !== "active" && (
+              <Alert variant="warning">このセッションは終了しています（入室できません）。</Alert>
             )}
           </div>
 

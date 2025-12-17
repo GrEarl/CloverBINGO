@@ -89,6 +89,7 @@ export default function ParticipantPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <div className="text-lg font-semibold text-neutral-50">{displayName || "（未設定）"}</div>
                 {view?.player?.progress?.isBingo && <Badge variant="success">BINGO</Badge>}
+                {view?.player?.status === "disabled" && <Badge variant="danger">無効</Badge>}
               </div>
             )}
             <div className="mt-1 text-xs text-neutral-400">
@@ -103,6 +104,12 @@ export default function ParticipantPage() {
             <Alert variant="warning">
               このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
             </Alert>
+          </div>
+        )}
+
+        {view?.player?.status === "disabled" && (
+          <div className="mt-6">
+            <Alert variant="danger">この参加者は無効化されています（判定/統計の対象外です）。</Alert>
           </div>
         )}
 

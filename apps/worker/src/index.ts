@@ -112,6 +112,7 @@ app.post("/api/invite/enter", async (c) => {
   const sessionRows = await db.select().from(sessions).where(eq(sessions.id, invite.sessionId)).limit(1);
   if (!sessionRows.length) return c.text("session not found", 404);
   const session = sessionRows[0];
+  if (session.status !== "active") return c.text("session ended", 410);
 
   const url = new URL(c.req.raw.url);
   const cookieName = invite.role === "admin" ? ADMIN_INVITE_COOKIE : invite.role === "mod" ? MOD_INVITE_COOKIE : null;
@@ -248,20 +249,12 @@ app.post("/api/mod/spotlight", async (c) => {
   return forwardToSession(c, session, "/mod/spotlight");
 });
 
-app.post("/api/mod/end", async (c) => {
+app.post("/api/mod/participant/status", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);
   const session = await resolveSessionByCode(c.env, code);
   if (!session) return c.text("session not found", 404);
-  return forwardToSession(c, session, "/mod/end");
-});
-
-app.post("/api/mod/reopen", async (c) => {
-  const code = c.req.query("code");
-  if (!code) return c.text("missing code", 400);
-  const session = await resolveSessionByCode(c.env, code);
-  if (!session) return c.text("session not found", 404);
-  return forwardToSession(c, session, "/mod/reopen");
+  return forwardToSession(c, session, "/mod/participant/status");
 });
 
 app.post("/api/dev/create-session", async (c) => {

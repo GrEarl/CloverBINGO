@@ -10,6 +10,7 @@ type DisplayScreen = "ten" | "one";
 
 type ReelStatus = "idle" | "spinning" | "stopped";
 type ReachIntensity = 0 | 1 | 2 | 3;
+type ParticipantStatus = "active" | "disabled";
 
 const ADMIN_INVITE_COOKIE = "cloverbingo_admin";
 const MOD_INVITE_COOKIE = "cloverbingo_mod";
@@ -41,8 +42,12 @@ type PendingDrawState = {
 
 type PlayerState = {
   id: string;
+  status: ParticipantStatus;
   displayName: string;
   joinedAt: number;
+  disabledAt: number | null;
+  disabledReason: string | null;
+  disabledBy: string | null;
   card: BingoCard;
   progress: BingoProgress;
 };
@@ -61,8 +66,12 @@ type SpotlightPlayerSummary = {
 
 type PrivilegedPlayerSnapshot = {
   id: string;
+  status: ParticipantStatus;
   displayName: string;
   joinedAt: number;
+  disabledAt: number | null;
+  disabledReason: string | null;
+  disabledBy: string | null;
   progress: BingoProgress;
   card: BingoCard;
 };
@@ -175,6 +184,14 @@ function clampSpotlightUpdatedBy(input: unknown): string | null {
   return trimmed;
 }
 
+function clampDisabledReason(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed.length < 1) return null;
+  if (trimmed.length > 64) return trimmed.slice(0, 64);
+  return trimmed;
+}
+
 function sanitizeSpotlightIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((v) => typeof v === "string").slice(0, 6);
@@ -194,6 +211,7 @@ function computeImpact(players: Record<string, PlayerState>, hypotheticallyDrawn
   let bingoPlayers = 0;
   const nextDrawn = hypotheticallyDrawn.concat([nextNumber]);
   for (const player of Object.values(players)) {
+    if (player.status !== "active") continue;
     const progress = evaluateCard(player.card, nextDrawn);
     if (progress.reachLines > 0) reachPlayers += 1;
     if (progress.isBingo) bingoPlayers += 1;
@@ -293,10 +311,16 @@ export class SessionDurableObject {
           if (!card) continue;
 
           loadedUpdatedAt = Math.max(loadedUpdatedAt, Date.parse(row.createdAt) || 0);
+          const status: ParticipantStatus = row.status === "disabled" ? "disabled" : "active";
+          const disabledAtMs = row.disabledAt ? Date.parse(row.disabledAt) : NaN;
           this.players[row.id] = {
             id: row.id,
+            status,
             displayName: row.displayName,
             joinedAt: Date.parse(row.createdAt) || nowMs(),
+            disabledAt: Number.isFinite(disabledAtMs) ? disabledAtMs : null,
+            disabledReason: row.disabledReason ?? null,
+            disabledBy: row.disabledBy ?? null,
             card,
             progress: evaluateCard(card, this.drawnNumbers),
           };
@@ -336,14 +360,14 @@ export class SessionDurableObject {
 
   private createSnapshotShared(): SnapshotShared {
     const playersList = Object.values(this.players);
-
-    const stats = computeSessionStats(playersList.map((p) => p.progress));
+    const activePlayers = playersList.filter((p) => p.status === "active");
+    const stats = computeSessionStats(activePlayers.map((p) => p.progress));
     const lastNumber = this.drawnNumbers.length > 0 ? this.drawnNumbers[this.drawnNumbers.length - 1] : null;
     const lastNumbers = this.drawnNumbers.slice(-10);
 
     const spotlightPlayers = this.spotlight.ids
       .map((id) => this.players[id])
-      .filter(Boolean)
+      .filter((p): p is PlayerState => Boolean(p && p.status === "active"))
       .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress }));
 
     let privilegedCache: PrivilegedPlayerSnapshot[] | null = null;
@@ -351,8 +375,12 @@ export class SessionDurableObject {
       if (privilegedCache) return privilegedCache;
       privilegedCache = playersList.map((p) => ({
         id: p.id,
+        status: p.status,
         displayName: p.displayName,
         joinedAt: p.joinedAt,
+        disabledAt: p.disabledAt,
+        disabledReason: p.disabledReason,
+        disabledBy: p.disabledBy,
         progress: p.progress,
         card: p.card,
       }));
@@ -397,8 +425,10 @@ export class SessionDurableObject {
         player: player
           ? {
               id: player.id,
+              status: player.status,
               displayName: player.displayName,
               joinedAt: player.joinedAt,
+              disabledAt: player.disabledAt,
               card: player.card,
               progress: player.progress,
             }
@@ -416,7 +446,7 @@ export class SessionDurableObject {
           : lastCommittedDigit;
       const spotlightPlayersWithCard = this.spotlight.ids
         .map((id) => this.players[id])
-        .filter(Boolean)
+        .filter((p): p is PlayerState => Boolean(p && p.status === "active"))
         .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress, card: p.card }));
       return {
         ...base,
@@ -510,6 +540,12 @@ export class SessionDurableObject {
     return remaining;
   }
 
+  private refreshPendingDrawImpact(): void {
+    if (!this.pendingDraw) return;
+    if (this.pendingDraw.state !== "prepared") return;
+    this.pendingDraw.impact = computeImpact(this.players, this.drawnNumbers, this.pendingDraw.number);
+  }
+
   private async ensurePendingDraw(): Promise<PendingDrawState | Response> {
     if (!this.session) return textResponse("session not found", { status: 404 });
     const activeError = this.assertActiveSession();
@@ -578,9 +614,13 @@ export class SessionDurableObject {
         id: playerId,
         sessionId,
         deviceId,
+        status: "active",
         displayName,
         cardJson: JSON.stringify(card),
         createdAt,
+        disabledAt: null,
+        disabledReason: null,
+        disabledBy: null,
       });
     } catch {
       // Race: another tab/device might have inserted first. Re-fetch and reuse.
@@ -603,12 +643,17 @@ export class SessionDurableObject {
 
     this.players[playerId] = {
       id: playerId,
+      status: "active",
       displayName,
       joinedAt: Date.parse(createdAt) || nowMs(),
+      disabledAt: null,
+      disabledReason: null,
+      disabledBy: null,
       card,
       progress,
     };
 
+    this.refreshPendingDrawImpact();
     this.touch();
     this.broadcastSnapshots();
 
@@ -649,14 +694,14 @@ export class SessionDurableObject {
     if (!this.session || !this.pendingDraw) return null;
 
     const number = this.pendingDraw.number;
-    const beforeBingo = new Set(Object.values(this.players).filter((p) => p.progress.isBingo).map((p) => p.id));
+    const beforeBingo = new Set(Object.values(this.players).filter((p) => p.status === "active" && p.progress.isBingo).map((p) => p.id));
 
     this.drawnNumbers.push(number);
     for (const player of Object.values(this.players)) {
       player.progress = evaluateCard(player.card, this.drawnNumbers);
     }
 
-    const afterBingo = new Set(Object.values(this.players).filter((p) => p.progress.isBingo).map((p) => p.id));
+    const afterBingo = new Set(Object.values(this.players).filter((p) => p.status === "active" && p.progress.isBingo).map((p) => p.id));
     let newBingoCount = 0;
     const newBingoIds: string[] = [];
     for (const id of afterBingo) {
@@ -667,7 +712,7 @@ export class SessionDurableObject {
     const newBingoNames = newBingoIds.map((id) => this.players[id]?.displayName ?? id);
 
     const seq = this.drawnNumbers.length;
-    const stats = computeSessionStats(Object.values(this.players).map((p) => p.progress));
+    const stats = computeSessionStats(Object.values(this.players).filter((p) => p.status === "active").map((p) => p.progress));
     const committedAt = isoNow();
 
     const db = getDb(this.env);
@@ -729,7 +774,7 @@ export class SessionDurableObject {
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "ten", at: startedAt });
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
 
-    const reachCount = computeSessionStats(Object.values(this.players).map((p) => p.progress)).reachPlayers;
+    const reachCount = computeSessionStats(Object.values(this.players).filter((p) => p.status === "active").map((p) => p.progress)).reachPlayers;
     const reachIntensity = reachIntensityFromCount(reachCount);
     const timing = spinTimingForIntensity(reachIntensity);
 
@@ -813,47 +858,6 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true, status: "ended", endedAt });
   }
 
-  private async handleModEnd(request: Request): Promise<Response> {
-    const loadError = await this.ensureLoaded(request);
-    if (loadError) return loadError;
-    const authError = await this.assertInvite(request, "mod");
-    if (authError) return authError;
-    if (!this.session) return textResponse("session not found", { status: 404 });
-
-    if (this.session.status === "ended") return jsonResponse({ ok: true, status: "ended" });
-
-    const endedAt = isoNow();
-    const db = getDb(this.env);
-    await db.update(sessions).set({ status: "ended", endedAt }).where(eq(sessions.id, this.session.id));
-
-    this.session.status = "ended";
-    this.session.endedAt = endedAt;
-    this.pendingDraw = null;
-    this.touch();
-    this.broadcastSnapshots();
-    return jsonResponse({ ok: true, status: "ended", endedAt });
-  }
-
-  private async handleModReopen(request: Request): Promise<Response> {
-    const loadError = await this.ensureLoaded(request);
-    if (loadError) return loadError;
-    const authError = await this.assertInvite(request, "mod");
-    if (authError) return authError;
-    if (!this.session) return textResponse("session not found", { status: 404 });
-
-    if (this.session.status === "active") return jsonResponse({ ok: true, status: "active" });
-
-    const db = getDb(this.env);
-    await db.update(sessions).set({ status: "active", endedAt: null }).where(eq(sessions.id, this.session.id));
-
-    this.session.status = "active";
-    this.session.endedAt = null;
-    this.pendingDraw = null;
-    this.touch();
-    this.broadcastSnapshots();
-    return jsonResponse({ ok: true, status: "active" });
-  }
-
   private async handleModSpotlight(request: Request): Promise<Response> {
     const loadError = await this.ensureLoaded(request);
     if (loadError) return loadError;
@@ -869,7 +873,7 @@ export class SessionDurableObject {
       return textResponse("invalid json", { status: 400 });
     }
 
-    const ids = sanitizeSpotlightIds((body as { spotlight?: unknown }).spotlight).filter((id) => Boolean(this.players[id]));
+    const ids = sanitizeSpotlightIds((body as { spotlight?: unknown }).spotlight).filter((id) => this.players[id]?.status === "active");
     const updatedBy = clampSpotlightUpdatedBy((body as { updatedBy?: unknown }).updatedBy) ?? "mod";
     const updatedAt = nowMs();
 
@@ -882,7 +886,7 @@ export class SessionDurableObject {
 
     const spotlightPlayers = this.spotlight.ids
       .map((id) => this.players[id])
-      .filter(Boolean)
+      .filter((p): p is PlayerState => Boolean(p && p.status === "active"))
       .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress }));
 
     this.broadcastEvent((a) => a?.role === "display" || a?.role === "mod" || a?.role === "admin", {
@@ -895,6 +899,91 @@ export class SessionDurableObject {
     this.touch();
     this.broadcastSnapshots();
     return jsonResponse({ ok: true, spotlight: this.spotlight });
+  }
+
+  private async handleModParticipantStatus(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "mod");
+    if (authError) return authError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+    if (!this.session) return textResponse("session not found", { status: 404 });
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const participantIdRaw = (body as { participantId?: unknown }).participantId;
+    if (typeof participantIdRaw !== "string" || participantIdRaw.trim() === "") return textResponse("participantId required", { status: 400 });
+    const participantId = participantIdRaw.trim();
+
+    const statusRaw = (body as { status?: unknown }).status;
+    const nextStatus: ParticipantStatus | null = statusRaw === "active" || statusRaw === "disabled" ? statusRaw : null;
+    if (!nextStatus) return textResponse("status required", { status: 400 });
+
+    const updatedBy = clampSpotlightUpdatedBy((body as { updatedBy?: unknown }).updatedBy) ?? "mod";
+    const reason = clampDisabledReason((body as { reason?: unknown }).reason);
+
+    const player = this.players[participantId];
+    if (!player) return textResponse("participant not found", { status: 404 });
+
+    const db = getDb(this.env);
+    if (nextStatus === "disabled") {
+      if (player.status !== "disabled") {
+        const disabledAt = isoNow();
+        await db
+          .update(participants)
+          .set({ status: "disabled", disabledAt, disabledReason: reason, disabledBy: updatedBy })
+          .where(and(eq(participants.sessionId, this.session.id), eq(participants.id, participantId)));
+        player.status = "disabled";
+        player.disabledAt = Date.parse(disabledAt) || nowMs();
+        player.disabledReason = reason;
+        player.disabledBy = updatedBy;
+      }
+    } else {
+      if (player.status !== "active") {
+        await db
+          .update(participants)
+          .set({ status: "active", disabledAt: null, disabledReason: null, disabledBy: null })
+          .where(and(eq(participants.sessionId, this.session.id), eq(participants.id, participantId)));
+        player.status = "active";
+        player.disabledAt = null;
+        player.disabledReason = null;
+        player.disabledBy = null;
+      }
+    }
+
+    if (nextStatus === "disabled" && this.spotlight.ids.includes(participantId)) {
+      const updatedAt = nowMs();
+      this.spotlight = {
+        version: this.spotlight.version + 1,
+        ids: this.spotlight.ids.filter((id) => id !== participantId),
+        updatedAt,
+        updatedBy,
+      };
+
+      const spotlightPlayers = this.spotlight.ids
+        .map((id) => this.players[id])
+        .filter((p): p is PlayerState => Boolean(p && p.status === "active"))
+        .map((p) => ({ id: p.id, displayName: p.displayName, progress: p.progress }));
+
+      this.broadcastEvent((a) => a?.role === "display" || a?.role === "mod" || a?.role === "admin", {
+        type: "spotlight.changed",
+        spotlight: {
+          ...this.spotlight,
+          players: spotlightPlayers,
+        },
+      });
+    }
+
+    this.refreshPendingDrawImpact();
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -940,8 +1029,7 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/prepare" && request.method === "POST") return this.handleAdminPrepare(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
-    if (url.pathname === "/mod/end" && request.method === "POST") return this.handleModEnd(request);
-    if (url.pathname === "/mod/reopen" && request.method === "POST") return this.handleModReopen(request);
+    if (url.pathname === "/mod/participant/status" && request.method === "POST") return this.handleModParticipantStatus(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);
 
     return textResponse("not found", { status: 404 });

@@ -57,7 +57,8 @@
 - [x] (2025-12-17 04:30Z) 会場表示: スポットライト枠にビンゴカードを表示し、抽選演出中も表示が消えない（DOのdisplay snapshotに `drawnNumbers` と spotlightの `card` を含め、Display UIはカードを描画しつつ id→player をキャッシュして保持する）。
 - [x] (2025-12-17 04:30Z) 会場表示: 数字/統計/スポットライトの文字・要素サイズを遠距離視認向けに拡大し、レイアウトを詰める（数字の `md:` 縮小を撤廃して画面占有率を上げ、スポットライト側もカード中心に再構成）。
 - [x] (2025-12-17 04:30Z) 参加者: 同一端末からの複数参加は最終参加のみ有効にする（重複を作らない）。上書き（表示名更新など）時は警告を出す（D1に `participants.device_id` + unique index、Participant UIで `deviceId` を送信し、更新時に警告を出す）。
-- [x] (2025-12-17 05:11Z) Mod: セッションを「無効化（参加者の判定から弾く）/ 復帰」できるようにする（誤作成対策）。`POST /api/mod/end` と `POST /api/mod/reopen`（DO: `/mod/end` / `/mod/reopen`）を実装し、Mod UI はトグル操作にした。あわせて、終了中でも Mod/Admin が入室できるように `/api/invite/enter` は ended を拒否しない（操作自体は DO 側で弾く）。
+- [x] (2025-12-17 05:11Z) （仕様誤解・後で撤去）Mod: セッションを「無効化（参加者の判定から弾く）/ 復帰」できるようにする（誤作成対策）として `POST /api/mod/end` / `POST /api/mod/reopen`（DO: `/mod/end` / `/mod/reopen`）と Mod UI トグルを実装した。また、終了中でも Mod/Admin が入室できるように `/api/invite/enter` は ended を拒否しない構成にした。
+- [x] (2025-12-17 05:46Z) 仕様再確認対応: Mod の要件は「セッション無効化」ではなく「特定参加者（不正/重複）の無効化/復帰」だったため、Mod end/reopen（`/api/mod/end` / `/api/mod/reopen`）を撤去し、参加者単位の無効化/復帰（D1 `participants.status`、Mod UI から切替、disabled は判定/統計/スポットライト/新規BINGO対象から除外）を実装した。
 - [x] (2025-12-17 04:30Z) Admin音響: BGM の無音を詰める（できるだけギャップを減らす）、ducking を強め（目安 75%）、SFX/BGM の音量感を合わせる（BGM末尾の無音をタイマーでスキップし、ducking 75% + SFX音量スライダーを追加）。
 - [x] (2025-12-17 04:30Z) 会場表示: 演出のタメやエフェクトを詰め、全体の表示を PS1 風（ローポリ/ピクセル寄り）の質感に少し寄せる（視認性は維持）（デジタル格子の薄いオーバーレイ、BINGO名タイムライン、確定後の読みやすさ強調時間などを調整）。
 
@@ -74,7 +75,7 @@
 - `useSessionSocket` の `ServerEvent` は「未知イベント」も許容する union になっているため、画面側で `type` だけを見ると型が `unknown` に落ちる場合がある。安全に扱うには shape を検証する type guard が必要だった（例：Display の `draw.spin` / `draw.committed`）。
 - Cloudflare Free プランでは Durable Objects を使う際に `new_sqlite_classes` の migration が必要で、`new_classes` だと deploy が失敗する（code: 10097）。
 - Workers の静的アセット配信で SPA ルート（例：`/s/:code`）が 404 になり得るため、assets の `not_found_handling = "single-page-application"` を有効化する必要があった（API は `/api/*` を Worker 優先にする）。
-- `sessions.status = ended` のとき `/api/invite/enter` が 410 を返すと Mod が再入室できず「復帰」ができなかったため、招待入室は許可しつつ、操作は DO 側（`assertActiveSession`）で弾く構成にした。
+- 要件の再確認により「Modでセッションを無効化/復帰」そのものが不要になったため、ended セッションの招待入室（cookie付与）を許可する構成は撤去し、通常通り ended では `/api/invite/enter` を拒否する。
 
 ## Decision Log
 
@@ -144,8 +145,11 @@
 - Decision: `account_id` / `database_id` はリポジトリにコミットせず、`apps/worker/wrangler.local.toml`（gitignore）でローカル/CI 側に持つ。Worker 側の npm scripts とセッション作成スクリプトは `wrangler.local.toml` があれば自動で使う。
   Rationale: GitHub に識別子を残さずにデプロイ手順を成立させ、複数アカウント環境でも非対話運用（`echo y | ...`）で事故りにくくするため。
   Date/Author: 2025-12-17 / codex
-- Decision: Mod の「セッション終了」は“参加者を判定から弾く（無効化）”として扱い、誤作成対策のために復帰（reopen）を必須にする。ended 中でも Mod/Admin の入室（cookie付与）は許可し、操作は DO の `assertActiveSession` で制限する。
-  Rationale: ended を強くしすぎると「復帰のための入室」まで閉じてしまい、運用事故を救えない。入室は許可しつつ、実際の操作を DO で弾く方が安全。
+- Decision: （撤回）Mod の「セッション終了」は“参加者を判定から弾く（無効化）”として扱い、誤作成対策のために復帰（reopen）を必須にする。ended 中でも Mod/Admin の入室（cookie付与）は許可し、操作は DO の `assertActiveSession` で制限する。
+  Rationale: （当時）ended を強くしすぎると「復帰のための入室」まで閉じてしまい、運用事故を救えないと判断したため。
+  Date/Author: 2025-12-17 / codex
+- Decision: Mod の「無効化/復帰」はセッション単位ではなく参加者単位で実装する（D1 `participants.status = active|disabled`）。disabled の参加者は統計/新規BINGO/スポットライト対象から除外するが、カードの進捗計算自体は更新し続け、復帰時に整合するようにする。
+  Rationale: 要件は「不正/重複した参加者だけを判定から弾きたい」であり、セッション全体を止める必要がないため。除外対象でも復帰できるよう進捗更新は維持する。
   Date/Author: 2025-12-17 / codex
 
 ## Outcomes & Retrospective
@@ -193,7 +197,7 @@ Admin の音響仕様（このExecPlanでの合意）:
 
 フル要件に向けて、永続化（D1）と運用安全策（招待URLの安全化、end、復帰同期）を先に固めます。次に SessionDO を commitログ中心で復元できるように刷新し、WebSocketプロトコル（snapshot + 必要イベント）を role ごとに配信します。その上で Web UI（参加者/Admin/Mod/会場表示）を要件に沿って強化し、最後にテスト（ロジック/復元）と負荷確認（WS 200接続）を追加します。
 
-追加の運用フィードバック（会場実機）対応として、(1) 会場表示の視認性とレイアウト（数字最大化/テキスト拡大/PS1寄せ）、(2) スポットライトのカード表示と保持、(3) 新規BINGO名の会場表示、(4) 端末重複参加の抑止、(5) Mod 側のセッション終了、(6) 音響の詰め（無音トリム/ducking/音量バランス）を反映します。これらはサーバ（DO/WS/DB）と Web（Display/Participant/Mod/Admin）の両方に跨るため、まずプロトコルと永続化（必要ならD1 migration）を固め、次に各画面のUXを詰めます。
+追加の運用フィードバック（会場実機）対応として、(1) 会場表示の視認性とレイアウト（数字最大化/テキスト拡大/PS1寄せ）、(2) スポットライトのカード表示と保持、(3) 新規BINGO名の会場表示、(4) 端末重複参加の抑止、(5) Mod 側の参加者無効化/復帰（不正/重複を判定から除外）、(6) 音響の詰め（無音トリム/ducking/音量バランス）を反映します。これらはサーバ（DO/WS/DB）と Web（Display/Participant/Mod/Admin）の両方に跨るため、まずプロトコルと永続化（必要ならD1 migration）を固め、次に各画面のUXを詰めます。
 
 実装の順序（高リスクから潰す）:
 

@@ -22,6 +22,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 }
 
 function sortPlayers(a: Player, b: Player): number {
+  if (a.status !== b.status) return a.status === "disabled" ? 1 : -1;
   if (a.progress.minMissingToLine !== b.progress.minMissingToLine) return a.progress.minMissingToLine - b.progress.minMissingToLine;
   if (a.progress.reachLines !== b.progress.reachLines) return b.progress.reachLines - a.progress.reachLines;
   return a.displayName.localeCompare(b.displayName, "ja");
@@ -56,12 +57,13 @@ export default function ModPage() {
 
   const [draft, setDraft] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
-  const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const didInitDraft = useRef(false);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [disableReason, setDisableReason] = useState("");
 
   const clientIdKey = `cloverbingo:mod:${code}:clientId`;
   const [clientId, setClientId] = useLocalStorageString(clientIdKey, "");
@@ -107,6 +109,11 @@ export default function ModPage() {
   function toggle(id: string) {
     setDraft((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
+      const p = players.find((x) => x.id === id);
+      if (p?.status === "disabled") {
+        setDraftWarning("無効化された参加者はスポットライトに追加できません。");
+        return prev;
+      }
       if (prev.length >= 6) {
         setDraftWarning("スポットライトは最大6人です。外してから追加してください。");
         return prev;
@@ -146,26 +153,34 @@ export default function ModPage() {
     }
   }
 
-  async function toggleSessionStatus() {
+  async function setParticipantStatus(player: Player, next: "active" | "disabled") {
     if (!view) return;
-    const next = view.sessionStatus === "active" ? "ended" : "active";
-    if (
-      next === "ended" &&
-      !window.confirm(
-        "このセッションを無効化します（参加者は参加できず、抽選も停止します）。後で「復帰」できます。よろしいですか？",
-      )
-    )
+    if (view.sessionStatus !== "active") {
+      setError("このセッションは終了しているため操作できません。");
       return;
-    if (next === "active" && !window.confirm("このセッションを復帰します（参加者の参加と抽選を再開できます）。よろしいですか？")) return;
-    setEnding(true);
+    }
+    if (next === "disabled") {
+      const ok = window.confirm(`「${player.displayName}」を無効化します（判定/統計/スポットライトから除外）。よろしいですか？`);
+      if (!ok) return;
+    } else {
+      const ok = window.confirm(`「${player.displayName}」を復帰します（判定/統計に戻します）。よろしいですか？`);
+      if (!ok) return;
+    }
+
+    setStatusUpdating(true);
     setError(null);
     try {
-      if (next === "ended") await postJson(`/api/mod/end?code=${encodeURIComponent(code)}`, {});
-      else await postJson(`/api/mod/reopen?code=${encodeURIComponent(code)}`, {});
+      await postJson(`/api/mod/participant/status?code=${encodeURIComponent(code)}`, {
+        participantId: player.id,
+        status: next,
+        reason: next === "disabled" ? disableReason : undefined,
+        updatedBy: effectiveUpdatedBy,
+      });
+      if (next === "disabled") setDisableReason("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
-      setEnding(false);
+      setStatusUpdating(false);
     }
   }
 
@@ -199,25 +214,13 @@ export default function ModPage() {
               <span className="font-mono text-neutral-200">{filteredPlayers.length}</span> / last:{" "}
               <span className="font-mono text-neutral-200">{view?.lastNumber ?? "—"}</span>
             </div>
-            {view && (
-              <div className="mt-3 flex justify-end">
-                <Button
-                  disabled={ending}
-                  onClick={() => void toggleSessionStatus()}
-                  size="sm"
-                  variant={view.sessionStatus === "active" ? "destructive" : "primary"}
-                >
-                  {ending ? "更新中..." : view.sessionStatus === "active" ? "セッション無効化" : "セッション復帰"}
-                </Button>
-              </div>
-            )}
           </div>
         </div>
 
         {view?.sessionStatus === "ended" && (
           <div className="mt-6">
             <Alert variant="warning">
-              このセッションは無効化されています（参加者は参加できません）。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+              このセッションは終了しています（参加者は参加できません）。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
             </Alert>
           </div>
         )}
@@ -311,15 +314,59 @@ export default function ModPage() {
                       {selectedPlayer.progress.isBingo ? <span className="text-emerald-200">/ BINGO</span> : null}
                     </div>
                   )}
+                  {selectedPlayer?.status === "disabled" && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                      <Badge variant="danger">無効</Badge>
+                      {selectedPlayer.disabledReason ? <span className="text-red-200/90">{selectedPlayer.disabledReason}</span> : null}
+                      {selectedPlayer.disabledBy ? <span className="text-neutral-500">by {selectedPlayer.disabledBy}</span> : null}
+                      {selectedPlayer.disabledAt ? <span className="text-neutral-500">{relativeFromNow(selectedPlayer.disabledAt)}</span> : null}
+                    </div>
+                  )}
                 </div>
                 {selectedPlayer && (
-                  <Button onClick={() => toggle(selectedPlayer.id)} size="sm" variant="secondary">
-                    {draft.includes(selectedPlayer.id) ? "★ 下書きから外す" : "★ 下書きに追加"}
-                  </Button>
+                  <div className="flex flex-col items-end gap-2">
+                    <Button
+                      disabled={selectedPlayer.status === "disabled" && !draft.includes(selectedPlayer.id)}
+                      onClick={() => toggle(selectedPlayer.id)}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      {draft.includes(selectedPlayer.id) ? "★ 下書きから外す" : "★ 下書きに追加"}
+                    </Button>
+                    {selectedPlayer.status === "active" ? (
+                      <Button
+                        disabled={statusUpdating || view.sessionStatus !== "active"}
+                        onClick={() => void setParticipantStatus(selectedPlayer, "disabled")}
+                        size="sm"
+                        variant="destructive"
+                      >
+                        {statusUpdating ? "更新中..." : "無効化"}
+                      </Button>
+                    ) : (
+                      <Button
+                        disabled={statusUpdating || view.sessionStatus !== "active"}
+                        onClick={() => void setParticipantStatus(selectedPlayer, "active")}
+                        size="sm"
+                        variant="primary"
+                      >
+                        {statusUpdating ? "更新中..." : "復帰"}
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
               {selectedPlayer ? (
                 <div className="mt-4">
+                  {selectedPlayer.status === "active" && (
+                    <div className="mb-3">
+                      <Input
+                        className="py-1 text-xs"
+                        placeholder="無効化理由（任意）"
+                        value={disableReason}
+                        onChange={(e) => setDisableReason(e.target.value)}
+                      />
+                    </div>
+                  )}
                   {selectedPlayer.card ? <BingoCard card={selectedPlayer.card} drawnNumbers={view?.drawnNumbers ?? []} /> : <div className="text-sm text-neutral-400">カードなし</div>}
                 </div>
               ) : (
@@ -346,13 +393,19 @@ export default function ModPage() {
                 {filteredPlayers.map((p) => {
                   const selected = draft.includes(p.id);
                   const isBingo = p.progress.isBingo;
+                  const isDisabled = p.status === "disabled";
+                  const toggleDisabled = !selected && isDisabled;
                   const isFocused = selectedId === p.id;
                   return (
                     <div
                       key={p.id}
                       className={[
                         "rounded-xl border p-3",
-                        selected ? "border-emerald-500/30 bg-emerald-500/10" : "border-neutral-800 bg-neutral-950/30",
+                        selected
+                          ? "border-emerald-500/30 bg-emerald-500/10"
+                          : isDisabled
+                            ? "border-red-800/60 bg-red-950/20 opacity-70"
+                            : "border-neutral-800 bg-neutral-950/30",
                         isFocused ? "outline outline-2 outline-emerald-500/30" : "",
                       ].join(" ")}
                       title={p.id}
@@ -364,6 +417,7 @@ export default function ModPage() {
                               {p.displayName}
                             </span>
                             {isBingo ? <Badge variant="success">BINGO</Badge> : null}
+                            {isDisabled ? <Badge variant="danger">無効</Badge> : null}
                           </div>
                           <div className="mt-1 text-xs text-neutral-500">
                             min <span className="font-mono text-neutral-200">{p.progress.minMissingToLine}</span> / reach{" "}
@@ -372,10 +426,11 @@ export default function ModPage() {
                         </button>
                         <Button
                           className="h-7 w-7 justify-center px-0 py-0"
+                          disabled={toggleDisabled}
                           onClick={() => toggle(p.id)}
                           size="sm"
                           variant={selected ? "primary" : "secondary"}
-                          title={selected ? "下書きから外す" : "下書きに追加"}
+                          title={toggleDisabled ? "無効化された参加者は追加できません" : selected ? "下書きから外す" : "下書きに追加"}
                           type="button"
                         >
                           ★
