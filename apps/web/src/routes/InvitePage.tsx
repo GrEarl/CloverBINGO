@@ -126,13 +126,15 @@ export default function InvitePage() {
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button
-              disabled={entering || !token || info?.ok !== true || info.sessionStatus !== "active"}
+              disabled={entering || !token || info?.ok !== true}
               onClick={() => void enter()}
               variant="primary"
             >
               {entering ? "入室中..." : "入室"}
             </Button>
-            {info?.ok === true && info.sessionStatus !== "active" && <Alert variant="warning">このセッションは終了しています。</Alert>}
+            {info?.ok === true && info.sessionStatus !== "active" && (
+              <Alert variant="warning">このセッションは無効化/終了しています（Mod から復帰できます）。</Alert>
+            )}
           </div>
 
           {error && (
