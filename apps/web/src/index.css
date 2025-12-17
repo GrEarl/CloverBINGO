@@ -91,6 +91,46 @@ body {
   box-shadow: 0 0 15px var(--color-primary), inset 0 0 15px var(--color-primary);
 }
 
+/* Rainbow Theme Utilities */
+@keyframes rainbow-pan {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.rainbow-pan {
+  background-size: 200% 200%;
+  animation: rainbow-pan 2s linear infinite;
+}
+
+.rainbow-overlay {
+  background-image: linear-gradient(
+    90deg,
+    rgba(239, 68, 68, 0.25),
+    rgba(234, 179, 8, 0.25),
+    rgba(34, 197, 94, 0.25),
+    rgba(59, 130, 246, 0.25),
+    rgba(168, 85, 247, 0.25),
+    rgba(239, 68, 68, 0.25)
+  );
+}
+
+.rainbow-text {
+  background-image: linear-gradient(90deg, #ef4444, #eab308, #22c55e, #3b82f6, #a855f7, #ef4444);
+  background-size: 200% 200%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.rainbow-glow {
+  box-shadow:
+    0 0 48px rgba(239, 68, 68, 0.24),
+    0 0 64px rgba(234, 179, 8, 0.22),
+    0 0 80px rgba(34, 197, 94, 0.18),
+    0 0 96px rgba(59, 130, 246, 0.18),
+    0 0 112px rgba(168, 85, 247, 0.16);
+}
+
 /* Strobe Effect */
 @keyframes strobe-flash {
   0%, 100% { background-color: transparent; }

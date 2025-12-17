@@ -182,7 +182,7 @@ export default function AdminPage() {
   const [enterError, setEnterError] = useState<string | null>(null);
   const [enterToken, setEnterToken] = useState(inviteToken);
 
-  const [bgmVolume, setBgmVolume] = useLocalStorageString("cloverbingo:admin:bgmVolume", "0.45");
+  const [bgmVolume, setBgmVolume] = useLocalStorageString("cloverbingo:admin:bgmVolume", "0.75");
   const bgmVolumeValue = useMemo(() => clamp01(Number.parseFloat(bgmVolume)), [bgmVolume]);
   const [sfxVolume, setSfxVolume] = useLocalStorageString("cloverbingo:admin:sfxVolume", "0.75");
   const sfxVolumeValue = useMemo(() => clamp01(Number.parseFloat(sfxVolume)), [sfxVolume]);

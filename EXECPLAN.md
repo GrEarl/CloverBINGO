@@ -65,6 +65,8 @@
 - [x] (2025-12-17 08:24Z) Admin/Mod/Participant を含む全画面の操作性を壊さないよう、共有CSSの回帰（`overflow:hidden` / Tailwind `@config` 削除）を戻しつつ Display 向けの追加スタイルは `.crt-*` 等のクラス適用時のみ効くように限定した。
 - [x] (2025-12-17 08:24Z) Display の safeMode/reduced-motion においてスピン間隔を復元し、強いフラッシュ系演出（CRT flicker / strobe）は safeMode で抑制するようにした（初期 snapshot 未到達でも `view` アクセスで落ちない状態を維持）。
 - [x] (2025-12-17 08:24Z) `npx tsc -p apps/web/tsconfig.json --noEmit` と `npm -w apps/web run build` を通し、音源（OGG）が dist にコピーされ参照パスが一致していることを確認した。
+- [x] (2025-12-17 16:46Z) reach強度（`reachPlayers` → 0..3）に応じて会場表示（ten/one）の「カラーテーマ/演出強度」を段階的に切り替えた（強度1=黄、強度2=赤＋演出増、強度3=虹＋演出/振動/パーティクル増）。安全モード（`?safe=1` / reduced-motion / WS非接続）では強いフラッシュや過度な点滅・色変化を抑制する（safeMode時は強度を最大1へクランプ）。
+- [x] (2025-12-17 16:46Z) Admin 音量デフォルトを「BGM=0.75 / SFX=0.75」に合わせた（localStorageの初期値。既存ユーザーの保存値は尊重）。
 
 ## Surprises & Discoveries
 

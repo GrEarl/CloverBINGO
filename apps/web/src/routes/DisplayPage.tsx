@@ -156,11 +156,35 @@ export default function DisplayPage() {
   const reachCount = view?.stats?.reachPlayers ?? null;
   const reachIntensity = reachIntensityFromCount(reachCount);
   const visualReachIntensity: ReachIntensity = safeMode ? (Math.min(1, reachIntensity) as ReachIntensity) : reachIntensity;
+  const drawSpinning = view?.drawState === "spinning";
+  const tensionLevel: ReachIntensity = fxActive && drawSpinning ? visualReachIntensity : 0;
+  const tensionTheme = tensionLevel === 3 ? "rainbow" : tensionLevel === 2 ? "red" : tensionLevel === 1 ? "yellow" : "calm";
   const isSpinning = view?.reel.status === "spinning";
   const isLastSpinning = Boolean(isSpinning && reelSignal[otherDigit] === "stopped");
   
   // Spin speed: slow down in safe/reduced-motion mode to reduce motion and CPU load.
   const spinIntervalMs = safeMode || !fxEnabled ? 90 : isLastSpinning ? 60 : 40;
+
+  const noiseLevel: ReachIntensity = !safeMode && fxActive && drawSpinning ? tensionLevel : 0;
+  const noiseOpacityClass = safeMode
+    ? "opacity-[0.04]"
+    : noiseLevel === 3
+      ? "opacity-[0.18]"
+      : noiseLevel === 2
+        ? "opacity-[0.14]"
+        : noiseLevel === 1
+          ? "opacity-[0.1]"
+          : "opacity-[0.08]";
+  const noiseAnimClass =
+    safeMode || !fxActive
+      ? ""
+      : noiseLevel === 3
+        ? "animate-[clover-noise_3.2s_linear_infinite]"
+        : noiseLevel === 2
+          ? "animate-[clover-noise_5s_linear_infinite]"
+          : noiseLevel === 1
+            ? "animate-[clover-noise_7s_linear_infinite]"
+            : "animate-[clover-noise_8s_linear_infinite]";
 
   // Trigger shake helper
   const triggerShake = (intensity: "small" | "medium" | "violent") => {
@@ -172,13 +196,16 @@ export default function DisplayPage() {
 
   const bingoParticles = useMemo(() => {
     if (!bingoFx || safeMode || !fxActive) return [];
+    const particleCount = visualReachIntensity === 3 ? 60 : visualReachIntensity === 2 ? 45 : 30;
+    const minSize = visualReachIntensity === 3 ? 14 : visualReachIntensity === 2 ? 12 : 10;
+    const sizeJitter = visualReachIntensity === 3 ? 36 : visualReachIntensity === 2 ? 28 : 20;
     const list: Array<{ key: string; style: CSSProperties }> = [];
-    for (let i = 0; i < 30; i += 1) { // Even more particles
+    for (let i = 0; i < particleCount; i += 1) {
       const side = i % 2 === 0 ? "left" : "right";
       const xBase = side === "left" ? 10 : 78;
       const xJitter = Math.random() * 20;
       const x = xBase + xJitter;
-      const size = 10 + Math.floor(Math.random() * 20);
+      const size = minSize + Math.floor(Math.random() * sizeJitter);
       const delay = Math.floor(Math.random() * 300);
       const dur = 1000 + Math.floor(Math.random() * 800);
       const dx = (side === "left" ? 1 : -1) * (30 + Math.floor(Math.random() * 50));
@@ -196,7 +223,7 @@ export default function DisplayPage() {
       });
     }
     return list;
-  }, [bingoFx, fxActive, safeMode]);
+  }, [bingoFx, fxActive, safeMode, visualReachIntensity]);
 
   useEffect(() => {
     const list = view?.spotlight?.players ?? [];
@@ -239,7 +266,8 @@ export default function DisplayPage() {
           if (goPulseTimerRef.current) window.clearTimeout(goPulseTimerRef.current);
           goPulseTimerRef.current = window.setTimeout(() => setGoPulse(false), 560);
           
-          triggerShake("small");
+          const startShake = visualReachIntensity >= 3 ? "violent" : visualReachIntensity >= 2 ? "medium" : "small";
+          triggerShake(startShake);
         }
       }
 
@@ -266,7 +294,8 @@ export default function DisplayPage() {
       if (fxActive && !safeMode) {
         setConfirmedPulse(true);
         confirmedPulseTimerRef.current = window.setTimeout(() => setConfirmedPulse(false), 180);
-        triggerShake("medium");
+        const commitShake = visualReachIntensity >= 3 ? "violent" : "medium";
+        triggerShake(commitShake);
       }
 
       bingoAnnounceSeqRef.current += 1;
@@ -325,7 +354,7 @@ export default function DisplayPage() {
       }
       if (typeof nextBingoPlayers === "number") prevBingoPlayersRef.current = nextBingoPlayers;
     }
-  }, [lastEvent, fxActive, fxEnabled, safeMode]);
+  }, [lastEvent, fxActive, fxEnabled, safeMode, visualReachIntensity]);
 
   useEffect(() => {
     const count = view?.stats?.bingoPlayers;
@@ -564,14 +593,18 @@ export default function DisplayPage() {
 
       {fxActive && (
         <>
-            {/* Vignette & texture (in addition to CRT) */}
-          <div
-            className={cn(
-              "pointer-events-none fixed inset-0 z-0 bg-noise [background-size:180px_180px]",
-              safeMode ? "opacity-[0.04]" : "opacity-[0.1]",
-              !safeMode && "animate-[clover-noise_8s_linear_infinite]",
-            )}
-          />
+          {tensionTheme !== "calm" && (
+            <div
+              className={cn(
+                "pointer-events-none fixed inset-0 z-0",
+                tensionTheme === "yellow" && "bg-[radial-gradient(circle_at_center,rgba(234,179,8,0.14),rgba(0,0,0,0)_70%)]",
+                tensionTheme === "red" && "bg-[radial-gradient(circle_at_center,rgba(239,68,68,0.16),rgba(0,0,0,0)_70%)]",
+                tensionTheme === "rainbow" && "rainbow-overlay rainbow-pan opacity-[0.14] mix-blend-screen",
+              )}
+            />
+          )}
+          {/* Vignette & texture (in addition to CRT) */}
+          <div className={cn("pointer-events-none fixed inset-0 z-0 bg-noise [background-size:180px_180px]", noiseOpacityClass, noiseAnimClass)} />
           {/* Strobe Layer */}
           <div className={cn("pointer-events-none fixed inset-0 z-[5] mix-blend-overlay", strobeClass)} />
         </>
@@ -657,9 +690,21 @@ export default function DisplayPage() {
 
       {!connected && <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 text-xs text-pit-danger animate-pulse">SIGNAL LOST / RECONNECTING...</div>}
 
-      {fxEnabled && connected && isSpinning && typeof reachCount === "number" && (
-        <div className="fixed right-4 top-4 z-50 border border-pit-danger bg-pit-bg/90 px-4 py-2 text-xs font-bold text-pit-danger animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]">
-          REACH_ALERT :: {reachCount}
+      {fxEnabled && connected && drawSpinning && typeof reachCount === "number" && (
+        <div
+          className={cn(
+            "fixed right-4 top-4 z-50 border bg-pit-bg/90 px-4 py-2 text-xs font-bold animate-pulse",
+            tensionTheme === "calm" && "border-pit-border text-pit-text-main shadow-[0_0_10px_rgba(255,255,255,0.12)]",
+            tensionTheme === "yellow" && "border-pit-primary text-pit-primary shadow-[0_0_12px_rgba(234,179,8,0.45)]",
+            tensionTheme === "red" && "border-pit-danger text-pit-danger shadow-[0_0_12px_rgba(239,68,68,0.55)]",
+            tensionTheme === "rainbow" && "border-pit-primary shadow-[0_0_14px_rgba(255,255,255,0.18)]",
+          )}
+        >
+          {tensionTheme === "rainbow" ? (
+            <span className="rainbow-text rainbow-pan">REACH_ALERT :: {reachCount}</span>
+          ) : (
+            <>REACH_ALERT :: {reachCount}</>
+          )}
         </div>
       )}
 
@@ -717,37 +762,50 @@ export default function DisplayPage() {
         <div className={cn("flex items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
           <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
             <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
-                <div
-                  className={cn(
-                    "relative isolate overflow-hidden border p-[1.8vw]",
-                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
-                    fxActive && !safeMode && !isSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
-                    isSpinning && "border-pit-primary/50 shadow-[0_0_140px_rgba(234,179,8,0.3)]",
-                    fxActive && isLastSpinning && visualReachIntensity > 0 && "border-pit-danger/50 shadow-[0_0_180px_rgba(239,68,68,0.3)]",
-                    readableBoost && "bg-black/90",
-                  )}
-                >
+	                <div
+	                  className={cn(
+	                    "relative isolate overflow-hidden border p-[1.8vw]",
+	                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
+	                    fxActive && !safeMode && !drawSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
+	                    drawSpinning && tensionTheme === "calm" && "border-pit-text-dim/50 shadow-[0_0_120px_rgba(255,255,255,0.12)]",
+	                    drawSpinning && tensionTheme === "yellow" && "border-pit-primary/60 shadow-[0_0_180px_rgba(234,179,8,0.32)]",
+	                    drawSpinning && tensionTheme === "red" && "border-pit-danger/70 shadow-[0_0_210px_rgba(239,68,68,0.36)]",
+	                    drawSpinning && tensionTheme === "rainbow" && "border-pit-primary/70 rainbow-glow",
+	                    drawSpinning && isLastSpinning && tensionTheme === "calm" && "border-pit-text-dim/60 shadow-[0_0_160px_rgba(255,255,255,0.16)]",
+	                    drawSpinning && isLastSpinning && tensionTheme === "yellow" && "border-pit-primary/70 shadow-[0_0_240px_rgba(234,179,8,0.38)]",
+	                    drawSpinning && isLastSpinning && tensionTheme === "red" && "border-pit-danger/80 shadow-[0_0_280px_rgba(239,68,68,0.42)]",
+	                    drawSpinning && isLastSpinning && tensionTheme === "rainbow" && "shadow-[0_0_320px_rgba(255,255,255,0.18)]",
+	                    readableBoost && "bg-black/90",
+	                  )}
+	                >
                 <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)50%,rgba(0,0,0,0.25)50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[length:100%_4px,3px_100%] opacity-20" />
                 
-                {goPulse && fxActive && !safeMode && (
-                  <div className="pointer-events-none absolute inset-0 animate-[clover-go_560ms_ease-out] border-4 border-pit-primary" />
-                )}
+	                {goPulse && fxActive && !safeMode && (
+	                  <div
+	                    className={cn(
+	                      "pointer-events-none absolute inset-0 animate-[clover-go_560ms_ease-out] border-4",
+	                      tensionTheme === "red" ? "border-pit-danger" : tensionTheme === "calm" ? "border-pit-text-muted" : "border-pit-primary",
+	                    )}
+	                  />
+	                )}
                 {confirmedPulse && fxActive && !safeMode && (
                   <div className="pointer-events-none absolute inset-0 animate-[clover-confirm_180ms_ease-out] border-4 border-emerald-500" />
                 )}
 
-                <div
-                  className={cn(
-                    "relative z-10 font-black tabular-nums tracking-tight font-header",
-                    "text-[min(92vw,88vh)] leading-none",
-                    isSpinning
-                      ? "text-pit-primary drop-shadow-[0_0_20px_rgba(234,179,8,0.8)]"
-                      : "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
-                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
-                  )}
-                >
-                  {shownDigit ?? "?"}
-                </div>
+	                <div
+	                  className={cn(
+	                    "relative z-10 font-black tabular-nums tracking-tight font-header",
+	                    "text-[min(92vw,88vh)] leading-none",
+	                    drawSpinning && tensionTheme === "calm" && "text-pit-text-main drop-shadow-[0_0_18px_rgba(255,255,255,0.45)]",
+	                    drawSpinning && tensionTheme === "yellow" && "text-pit-primary drop-shadow-[0_0_22px_rgba(234,179,8,0.85)]",
+	                    drawSpinning && tensionTheme === "red" && "text-pit-danger drop-shadow-[0_0_28px_rgba(239,68,68,0.85)]",
+	                    drawSpinning && tensionTheme === "rainbow" && "rainbow-text rainbow-pan drop-shadow-[0_0_24px_rgba(255,255,255,0.25)]",
+	                    !drawSpinning && "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
+	                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
+	                  )}
+	                >
+	                  {shownDigit ?? "?"}
+	                </div>
 
                 {fxEnabled && readableBoost && (
                   <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 border border-pit-secondary bg-black/80 px-4 py-1 text-sm font-bold text-pit-secondary tracking-[0.2em] shadow-[0_0_10px_rgba(16,185,129,0.5)]">
@@ -756,13 +814,21 @@ export default function DisplayPage() {
                 )}
               </div>
             </div>
-            <div className="mt-4 text-sm font-mono text-pit-text-dim tracking-wider">
-              REEL_STATUS ::{" "}
-              <span className={cn("text-pit-text-main", view?.reel.status === "spinning" ? "text-pit-primary animate-pulse" : "")}>
-                {(view?.reel?.status ?? "idle").toUpperCase()}
-              </span>{" "}
-              <span className="mx-2">|</span> LAST_IDX :: <span className="font-mono text-pit-text-main">{view?.lastNumber ?? "—"}</span>
-            </div>
+	            <div className="mt-4 text-sm font-mono text-pit-text-dim tracking-wider">
+	              REEL_STATUS ::{" "}
+	              <span
+	                className={cn(
+	                  "text-pit-text-main",
+	                  view?.reel.status === "spinning" && tensionTheme === "yellow" && "text-pit-primary animate-pulse",
+	                  view?.reel.status === "spinning" && tensionTheme === "red" && "text-pit-danger animate-pulse",
+	                  view?.reel.status === "spinning" && tensionTheme === "rainbow" && "rainbow-text rainbow-pan animate-pulse",
+	                  view?.reel.status === "spinning" && tensionTheme === "calm" && "animate-pulse",
+	                )}
+	              >
+	                {(view?.reel?.status ?? "idle").toUpperCase()}
+	              </span>{" "}
+	              <span className="mx-2">|</span> LAST_IDX :: <span className="font-mono text-pit-text-main">{view?.lastNumber ?? "—"}</span>
+	            </div>
             {view?.sessionStatus === "ended" && (
               <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
                 SESSION_TERMINATED
