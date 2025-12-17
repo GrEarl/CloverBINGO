@@ -146,14 +146,22 @@ export default function ModPage() {
     }
   }
 
-  async function endSession() {
+  async function toggleSessionStatus() {
     if (!view) return;
-    if (view.sessionStatus !== "active") return;
-    if (!window.confirm("セッションを終了します。以後、全操作は無効になります。よろしいですか？")) return;
+    const next = view.sessionStatus === "active" ? "ended" : "active";
+    if (
+      next === "ended" &&
+      !window.confirm(
+        "このセッションを無効化します（参加者は参加できず、抽選も停止します）。後で「復帰」できます。よろしいですか？",
+      )
+    )
+      return;
+    if (next === "active" && !window.confirm("このセッションを復帰します（参加者の参加と抽選を再開できます）。よろしいですか？")) return;
     setEnding(true);
     setError(null);
     try {
-      await postJson(`/api/mod/end?code=${encodeURIComponent(code)}`, {});
+      if (next === "ended") await postJson(`/api/mod/end?code=${encodeURIComponent(code)}`, {});
+      else await postJson(`/api/mod/reopen?code=${encodeURIComponent(code)}`, {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -193,8 +201,13 @@ export default function ModPage() {
             </div>
             {view && (
               <div className="mt-3 flex justify-end">
-                <Button disabled={ending || view.sessionStatus !== "active"} onClick={() => void endSession()} size="sm" variant="destructive">
-                  {ending ? "終了中..." : "セッション終了"}
+                <Button
+                  disabled={ending}
+                  onClick={() => void toggleSessionStatus()}
+                  size="sm"
+                  variant={view.sessionStatus === "active" ? "destructive" : "primary"}
+                >
+                  {ending ? "更新中..." : view.sessionStatus === "active" ? "セッション無効化" : "セッション復帰"}
                 </Button>
               </div>
             )}
@@ -204,7 +217,7 @@ export default function ModPage() {
         {view?.sessionStatus === "ended" && (
           <div className="mt-6">
             <Alert variant="warning">
-              このセッションは終了しました。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
+              このセッションは無効化されています（参加者は参加できません）。{view.endedAt ? <span className="text-xs text-amber-100">endedAt: {view.endedAt}</span> : null}
             </Alert>
           </div>
         )}

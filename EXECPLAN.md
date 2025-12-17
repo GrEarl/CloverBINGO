@@ -57,7 +57,7 @@
 - [x] (2025-12-17 04:30Z) 会場表示: スポットライト枠にビンゴカードを表示し、抽選演出中も表示が消えない（DOのdisplay snapshotに `drawnNumbers` と spotlightの `card` を含め、Display UIはカードを描画しつつ id→player をキャッシュして保持する）。
 - [x] (2025-12-17 04:30Z) 会場表示: 数字/統計/スポットライトの文字・要素サイズを遠距離視認向けに拡大し、レイアウトを詰める（数字の `md:` 縮小を撤廃して画面占有率を上げ、スポットライト側もカード中心に再構成）。
 - [x] (2025-12-17 04:30Z) 参加者: 同一端末からの複数参加は最終参加のみ有効にする（重複を作らない）。上書き（表示名更新など）時は警告を出す（D1に `participants.device_id` + unique index、Participant UIで `deviceId` を送信し、更新時に警告を出す）。
-- [x] (2025-12-17 04:30Z) Mod: Mod 側からセッションを終了（消す）できるようにする（運用上の保険。end後は全操作無効）（`POST /api/mod/end` + DO `/mod/end` + Mod UI の End ボタン）。
+- [x] (2025-12-17 05:11Z) Mod: セッションを「無効化（参加者の判定から弾く）/ 復帰」できるようにする（誤作成対策）。`POST /api/mod/end` と `POST /api/mod/reopen`（DO: `/mod/end` / `/mod/reopen`）を実装し、Mod UI はトグル操作にした。あわせて、終了中でも Mod/Admin が入室できるように `/api/invite/enter` は ended を拒否しない（操作自体は DO 側で弾く）。
 - [x] (2025-12-17 04:30Z) Admin音響: BGM の無音を詰める（できるだけギャップを減らす）、ducking を強め（目安 75%）、SFX/BGM の音量感を合わせる（BGM末尾の無音をタイマーでスキップし、ducking 75% + SFX音量スライダーを追加）。
 - [x] (2025-12-17 04:30Z) 会場表示: 演出のタメやエフェクトを詰め、全体の表示を PS1 風（ローポリ/ピクセル寄り）の質感に少し寄せる（視認性は維持）（デジタル格子の薄いオーバーレイ、BINGO名タイムライン、確定後の読みやすさ強調時間などを調整）。
 
@@ -74,6 +74,7 @@
 - `useSessionSocket` の `ServerEvent` は「未知イベント」も許容する union になっているため、画面側で `type` だけを見ると型が `unknown` に落ちる場合がある。安全に扱うには shape を検証する type guard が必要だった（例：Display の `draw.spin` / `draw.committed`）。
 - Cloudflare Free プランでは Durable Objects を使う際に `new_sqlite_classes` の migration が必要で、`new_classes` だと deploy が失敗する（code: 10097）。
 - Workers の静的アセット配信で SPA ルート（例：`/s/:code`）が 404 になり得るため、assets の `not_found_handling = "single-page-application"` を有効化する必要があった（API は `/api/*` を Worker 優先にする）。
+- `sessions.status = ended` のとき `/api/invite/enter` が 410 を返すと Mod が再入室できず「復帰」ができなかったため、招待入室は許可しつつ、操作は DO 側（`assertActiveSession`）で弾く構成にした。
 
 ## Decision Log
 
@@ -143,6 +144,9 @@
 - Decision: `account_id` / `database_id` はリポジトリにコミットせず、`apps/worker/wrangler.local.toml`（gitignore）でローカル/CI 側に持つ。Worker 側の npm scripts とセッション作成スクリプトは `wrangler.local.toml` があれば自動で使う。
   Rationale: GitHub に識別子を残さずにデプロイ手順を成立させ、複数アカウント環境でも非対話運用（`echo y | ...`）で事故りにくくするため。
   Date/Author: 2025-12-17 / codex
+- Decision: Mod の「セッション終了」は“参加者を判定から弾く（無効化）”として扱い、誤作成対策のために復帰（reopen）を必須にする。ended 中でも Mod/Admin の入室（cookie付与）は許可し、操作は DO の `assertActiveSession` で制限する。
+  Rationale: ended を強くしすぎると「復帰のための入室」まで閉じてしまい、運用事故を救えない。入室は許可しつつ、実際の操作を DO で弾く方が安全。
+  Date/Author: 2025-12-17 / codex
 
 ## Outcomes & Retrospective
 
@@ -156,9 +160,9 @@
 
 Admin の音響仕様（このExecPlanでの合意）:
 
-- BGM: `OstCredits.ogg` → `OstDemoTrailer.ogg` → `OstReleaseTrailer.ogg` の順で連続再生し、終端まで行ったら先頭に戻ってループする。SE 再生中のみ BGM 音量を 50% にする（ducking）。
+- BGM: `OstCredits.ogg` → `OstDemoTrailer.ogg` → `OstReleaseTrailer.ogg` の順で連続再生し、終端まで行ったら先頭に戻ってループする。末尾の無音が長い曲があるため、BGM の末尾無音はタイマーでスキップして次曲へ送る（物理トリムはしない）。SE 再生中のみ BGM 音量を 25% にする（ducking 75%）。
 - SE（トリガーとファイル）:
-  - 音量: すべて最大（`volume=1.0`）
+  - 音量: UI の SFX スライダーで一括調整（端末内に保存）。デフォルトは 0.75。
   - prepare（`P` で「次の番号を準備」）: `SoundCoinDeposit.ogg` を1回 → `SoundSlotMachineStartupJingle.ogg`
   - リール中（spinning中）: `SoundSlotMachineFanfare.ogg` を「0〜7秒」の区間ループ再生
   - 桁確定（各桁の stop。順序はランダム）: `SoundSlotMachineScored.ogg`

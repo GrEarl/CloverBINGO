@@ -834,6 +834,26 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true, status: "ended", endedAt });
   }
 
+  private async handleModReopen(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "mod");
+    if (authError) return authError;
+    if (!this.session) return textResponse("session not found", { status: 404 });
+
+    if (this.session.status === "active") return jsonResponse({ ok: true, status: "active" });
+
+    const db = getDb(this.env);
+    await db.update(sessions).set({ status: "active", endedAt: null }).where(eq(sessions.id, this.session.id));
+
+    this.session.status = "active";
+    this.session.endedAt = null;
+    this.pendingDraw = null;
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, status: "active" });
+  }
+
   private async handleModSpotlight(request: Request): Promise<Response> {
     const loadError = await this.ensureLoaded(request);
     if (loadError) return loadError;
@@ -921,6 +941,7 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
     if (url.pathname === "/mod/end" && request.method === "POST") return this.handleModEnd(request);
+    if (url.pathname === "/mod/reopen" && request.method === "POST") return this.handleModReopen(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);
 
     return textResponse("not found", { status: 404 });
