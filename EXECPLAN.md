@@ -70,6 +70,7 @@
 - [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: テスト用セッション機能（Admin `?dev=1`）として「ダミー参加者の大量投入」「演出強度（reach強度）の override（0..3 / AUTO）」「次の当選番号の強制prepare」「状態リセット（revive含む）」を追加し、実機に近い演出確認を“端末を何台も用意せず”に行えるようにした（Worker/DO: `/api/admin/dev/*`）。
 - [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: 1モニターで検証し切れるように `/s/:code/dev`（Devデッキ: display ten/one + admin を同一画面に集約）と、セッション無しで演出を触れる `/showcase`（演出ショーケース）を追加した。
 - [x] (2025-12-18 20:42Z) 実機フィードバック対応: DevTools の `dev.seed` が本番で 500 になる問題を修正（D1/Drizzle の multi-row insert が環境により失敗し得るため、dev用途は 1行ずつ insert に変更）。あわせて Devデッキに「入室（招待token）」導線と iframe 再読込を追加し、Display は内側（統計）の重複表示を撤去して “数字/スポットライト” に寄せつつ、縦方向に見切れないようレイアウトを詰めた。
+- [x] (2025-12-18 21:18Z) Display の追加調整: 数字の横幅を増やし、スポットライト未使用時は統計を表彰台風に表示し、`PerfectDOSVGA437` フォントを導入した（Web: `tsc`/`vite build` 通過まで確認）。
 
 ## Surprises & Discoveries
 
@@ -168,6 +169,12 @@
   Date/Author: 2025-12-18 / codex
 - Decision: 会場表示（Display ten/one）は 2画面運用前提のため、統計は原則表示しない（重複しやすく、数字の可読性を落とす）。会場表示は “数字 + スポットライト（カード）” に寄せる。
   Rationale: 遠距離視認性と演出の主役（数字）を最優先し、情報過多による視線移動と見切れリスクを減らすため。
+  Date/Author: 2025-12-18 / codex
+- Decision: 会場表示（ten/one）の統計は常時表示しないが、「その画面側でスポットライトが0人」の時は空白を避けるため、統計（`minMissingHistogram` を中心）を表彰台風に大きく表示する。
+  Rationale: スポットライト未使用時にも会場表示が寂しくならず、かつ 2画面運用でも数字の可読性を損ねにくい形で“状況”を伝えられるため。
+  Date/Author: 2025-12-18 / codex
+- Decision: 会場表示の数字フォント（`font-header`）は `PerfectDOSVGA437` を優先し、横方向の詰まりは `scale-x` とリール枠の左右余白で調整する。
+  Rationale: PS1/ピクセル寄せの質感を上げつつ、遠距離での数字判読（輪郭の明瞭さ）を維持するため。
   Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective

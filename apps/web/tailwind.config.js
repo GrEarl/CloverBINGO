@@ -28,7 +28,7 @@ export default {
       fontFamily: {
         // Fallback to standard sans/mono, but plan to swap if a better font is found
         mono: ['"VT323"', 'monospace'], // Retro terminal feel
-        header: ['"Share Tech Mono"', 'monospace'], // Technical headers
+        header: ['"PerfectDOSVGA437"', '"Share Tech Mono"', 'monospace'], // Display reel digits
         sans: ['"Inter"', 'sans-serif'],
       },
       backgroundImage: {

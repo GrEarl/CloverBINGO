@@ -1,6 +1,12 @@
 @config "../tailwind.config.js";
 @import "tailwindcss";
 
+@font-face {
+  font-family: "PerfectDOSVGA437";
+  src: url("/fonts/PerfectDOSVGA437.ttf") format("truetype");
+  font-display: swap;
+}
+
 html,
 body {
   height: 100%;

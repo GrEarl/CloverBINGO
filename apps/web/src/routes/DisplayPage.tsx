@@ -477,45 +477,109 @@ export default function DisplayPage() {
     }
     sidePlayers.push(playerById.get(id) ?? spotlightCacheRef.current.get(id) ?? null);
   }
-  const sideCards: ReactNode[] = sidePlayers.map((p, idx) => {
-    if (!p) {
-      return (
-        <div key={`spotlight-empty:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/60 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.4)]">
-          <div className="text-xs text-pit-text-muted">SPOTLIGHT</div>
-          <div className="mt-3 text-sm text-pit-text-dim">EMPTY</div>
-        </div>
-      );
-    }
+  const showStatsFallback = sidePlayers.every((p) => p === null);
+  const stats = view?.stats ?? null;
+  const minMissing = stats?.minMissingHistogram ?? null;
+  const statBingo = minMissing?.["0"] ?? stats?.bingoPlayers ?? 0;
+  const statOneAway = minMissing?.["1"] ?? stats?.reachPlayers ?? 0;
+  const statTwoAway = minMissing?.["2"] ?? 0;
+  const statThreePlus = minMissing?.["3plus"] ?? 0;
 
-    return (
-      <div key={`spotlight:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-        <div className="flex items-center justify-between gap-2">
-          <div className="truncate text-base font-bold text-pit-text-main text-glow">{p.displayName}</div>
-          {p.progress.isBingo && (
-            <Badge variant="success" className="shrink-0">
-              BINGO
-            </Badge>
-          )}
-        </div>
-        {p.card ? (
-          <div className="mt-2">
-            <BingoCard
-              variant="compact"
-              card={p.card}
-              drawnNumbers={drawnNumbers}
-              showHeaders={false}
-              className="mx-auto max-w-[180px]"
-            />
+  const sideCards: ReactNode[] = showStatsFallback
+    ? [
+        <div
+          key="stats:fallback"
+          className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_12px_rgba(0,0,0,0.55)]"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs text-pit-text-muted tracking-[0.22em]">STATS</div>
+            <div className="text-xs text-pit-text-dim">
+              DRAW <span className="font-mono text-pit-primary">{view?.drawCount ?? 0}</span>/75
+            </div>
           </div>
-        ) : (
-          <div className="mt-2 text-xs text-pit-text-dim">NO CARD DATA</div>
-        )}
-        <div className="mt-2 text-[0.7rem] text-pit-text-dim">
-          MIN:{p.progress.minMissingToLine} / REACH:{p.progress.reachLines}
-        </div>
-      </div>
-    );
-  });
+
+          {/* Podium */}
+          <div className="mt-4 flex items-end justify-center gap-3">
+            <div className="w-[30%]">
+              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">1 AWAY</div>
+              <div className="flex h-[max(10rem,20vh)] items-end justify-center border border-pit-border bg-black/40 px-2 pb-3">
+                <div className="text-center">
+                  <div className="text-[min(6.2vw,5.2rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_18px_rgba(234,179,8,0.55)]">
+                    {statOneAway}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="w-[34%]">
+              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">BINGO</div>
+              <div className="flex h-[max(12rem,24vh)] items-end justify-center border border-pit-primary/60 bg-black/50 px-2 pb-3 shadow-[0_0_22px_rgba(234,179,8,0.2)]">
+                <div className="text-center">
+                  <div className="text-[min(6.8vw,5.8rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.75)]">
+                    {statBingo}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="w-[30%]">
+              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">2 AWAY</div>
+              <div className="flex h-[max(9rem,18vh)] items-end justify-center border border-pit-border bg-black/35 px-2 pb-3">
+                <div className="text-center">
+                  <div className="text-[min(5.5vw,4.6rem)] font-black tabular-nums text-pit-text-main drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]">
+                    {statTwoAway}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-pit-border/60 pt-3 text-sm text-pit-text-dim">
+            <div className="tracking-[0.18em]">3+ AWAY</div>
+            <div className="font-mono text-[min(4.2vw,3.2rem)] font-black tabular-nums text-pit-text-main">{statThreePlus}</div>
+          </div>
+        </div>,
+      ]
+    : sidePlayers.map((p, idx) => {
+        if (!p) {
+          return (
+            <div
+              key={`spotlight-empty:${idx}`}
+              className="rounded-none border border-pit-border bg-pit-surface/60 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.4)]"
+            >
+              <div className="text-xs text-pit-text-muted tracking-[0.18em]">SPOTLIGHT</div>
+              <div className="mt-3 text-sm text-pit-text-dim">EMPTY</div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={`spotlight:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+            <div className="flex items-center justify-between gap-2">
+              <div className="truncate text-base font-bold text-pit-text-main text-glow">{p.displayName}</div>
+              {p.progress.isBingo && (
+                <Badge variant="success" className="shrink-0">
+                  BINGO
+                </Badge>
+              )}
+            </div>
+            {p.card ? (
+              <div className="mt-2">
+                <BingoCard
+                  variant="compact"
+                  card={p.card}
+                  drawnNumbers={drawnNumbers}
+                  showHeaders={false}
+                  className="mx-auto max-w-[180px]"
+                />
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-pit-text-dim">NO CARD DATA</div>
+            )}
+            <div className="mt-2 text-[0.7rem] text-pit-text-dim">
+              MIN:{p.progress.minMissingToLine} / REACH:{p.progress.reachLines}
+            </div>
+          </div>
+        );
+      });
 
   const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
   const glitchClass = glitch ? "glitch-active" : "";
@@ -663,15 +727,15 @@ export default function DisplayPage() {
 	        <div className={cn("flex min-h-0 items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
 	          <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
 	            <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
-		                <div
-	                  className={cn(
-	                    "relative isolate overflow-hidden border p-[1.8vw]",
-	                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
-	                    fxActive && !safeMode && !drawSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
-	                    drawSpinning && tensionTheme === "calm" && "border-pit-text-dim/50 shadow-[0_0_120px_rgba(255,255,255,0.12)]",
-	                    drawSpinning && tensionTheme === "yellow" && "border-pit-primary/60 shadow-[0_0_180px_rgba(234,179,8,0.32)]",
-	                    drawSpinning && tensionTheme === "red" && "border-pit-danger/70 shadow-[0_0_210px_rgba(239,68,68,0.36)]",
-	                    drawSpinning && tensionTheme === "rainbow" && "border-pit-primary/70 rainbow-glow",
+			                <div
+			                  className={cn(
+			                    "relative isolate overflow-hidden border max-w-full w-[min(96vw,160vh)] py-[1.4vw] px-[4.2vw]",
+			                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
+			                    fxActive && !safeMode && !drawSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
+			                    drawSpinning && tensionTheme === "calm" && "border-pit-text-dim/50 shadow-[0_0_120px_rgba(255,255,255,0.12)]",
+			                    drawSpinning && tensionTheme === "yellow" && "border-pit-primary/60 shadow-[0_0_180px_rgba(234,179,8,0.32)]",
+			                    drawSpinning && tensionTheme === "red" && "border-pit-danger/70 shadow-[0_0_210px_rgba(239,68,68,0.36)]",
+		                    drawSpinning && tensionTheme === "rainbow" && "border-pit-primary/70 rainbow-glow",
 	                    drawSpinning && isLastSpinning && tensionTheme === "calm" && "border-pit-text-dim/60 shadow-[0_0_160px_rgba(255,255,255,0.16)]",
 	                    drawSpinning && isLastSpinning && tensionTheme === "yellow" && "border-pit-primary/70 shadow-[0_0_240px_rgba(234,179,8,0.38)]",
 	                    drawSpinning && isLastSpinning && tensionTheme === "red" && "border-pit-danger/80 shadow-[0_0_280px_rgba(239,68,68,0.42)]",
@@ -693,20 +757,20 @@ export default function DisplayPage() {
                   <div className="pointer-events-none absolute inset-0 animate-[clover-confirm_180ms_ease-out] border-4 border-emerald-500" />
                 )}
 
-	                <div
-	                  className={cn(
-	                    "relative z-10 font-black tabular-nums tracking-tight font-header",
-	                    "text-[min(92vw,88vh)] leading-none",
-	                    drawSpinning && tensionTheme === "calm" && "text-pit-text-main drop-shadow-[0_0_18px_rgba(255,255,255,0.45)]",
-	                    drawSpinning && tensionTheme === "yellow" && "text-pit-primary drop-shadow-[0_0_22px_rgba(234,179,8,0.85)]",
-	                    drawSpinning && tensionTheme === "red" && "text-pit-danger drop-shadow-[0_0_28px_rgba(239,68,68,0.85)]",
-	                    drawSpinning && tensionTheme === "rainbow" && "rainbow-text rainbow-pan drop-shadow-[0_0_24px_rgba(255,255,255,0.25)]",
-	                    !drawSpinning && "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
-	                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
-	                  )}
-	                >
-	                  {shownDigit ?? "?"}
-	                </div>
+			                <div
+			                  className={cn(
+			                    "relative z-10 font-black tabular-nums tracking-tight font-header scale-x-110",
+			                    "text-[min(50vw,72vh)] leading-none",
+			                    drawSpinning && tensionTheme === "calm" && "text-pit-text-main drop-shadow-[0_0_18px_rgba(255,255,255,0.45)]",
+			                    drawSpinning && tensionTheme === "yellow" && "text-pit-primary drop-shadow-[0_0_22px_rgba(234,179,8,0.85)]",
+			                    drawSpinning && tensionTheme === "red" && "text-pit-danger drop-shadow-[0_0_28px_rgba(239,68,68,0.85)]",
+		                    drawSpinning && tensionTheme === "rainbow" && "rainbow-text rainbow-pan drop-shadow-[0_0_24px_rgba(255,255,255,0.25)]",
+		                    !drawSpinning && "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
+		                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
+		                  )}
+		                >
+		                  {shownDigit ?? "?"}
+		                </div>
 
                 {fxEnabled && readableBoost && (
                   <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 border border-pit-secondary bg-black/80 px-4 py-1 text-sm font-bold text-pit-secondary tracking-[0.2em] shadow-[0_0_10px_rgba(16,185,129,0.5)]">
@@ -715,29 +779,14 @@ export default function DisplayPage() {
                 )}
               </div>
             </div>
-	            <div className="mt-4 text-sm font-mono text-pit-text-dim tracking-wider">
-	              REEL_STATUS ::{" "}
-	              <span
-	                className={cn(
-	                  "text-pit-text-main",
-	                  view?.reel?.status === "spinning" && tensionTheme === "yellow" && "text-pit-primary animate-pulse",
-	                  view?.reel?.status === "spinning" && tensionTheme === "red" && "text-pit-danger animate-pulse",
-	                  view?.reel?.status === "spinning" && tensionTheme === "rainbow" && "rainbow-text rainbow-pan animate-pulse",
-	                  view?.reel?.status === "spinning" && tensionTheme === "calm" && "animate-pulse",
-	                )}
-	              >
-	                {(view?.reel?.status ?? "idle").toUpperCase()}
-	              </span>{" "}
-	              <span className="mx-2">|</span> LAST_IDX :: <span className="font-mono text-pit-text-main">{view?.lastNumber ?? "—"}</span>
-		            </div>
-	            {view?.sessionStatus === "ended" && (
-	              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
-	                SESSION_TERMINATED
-              </div>
-            )}
-	          </div>
-	        </div>
-	        {screen === "one" && <aside className="grid min-h-0 gap-3 lg:order-3">{sideCards}</aside>}
+		            {view?.sessionStatus === "ended" && (
+		              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
+		                SESSION_TERMINATED
+	              </div>
+	            )}
+		          </div>
+		        </div>
+		        {screen === "one" && <aside className="grid min-h-0 gap-3 lg:order-3">{sideCards}</aside>}
 	      </div>
 	      </div>
 	    </main>
