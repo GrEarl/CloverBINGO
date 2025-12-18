@@ -1,15 +1,30 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
 import { cn } from "../lib/cn";
+
+type InviteEnterResponse =
+  | { ok: false; error?: string }
+  | { ok: true; role: "admin" | "mod"; sessionCode: string; redirectTo: string };
 
 function toggleParam(searchParams: URLSearchParams, key: string, onValue: string, offValue: string) {
   const next = new URLSearchParams(searchParams);
   const current = next.get(key);
   next.set(key, current === onValue ? offValue : onValue);
   return next;
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.text()) || `request failed (${res.status})`);
+  return (await res.json()) as T;
 }
 
 export default function DevDeckPage() {
@@ -19,6 +34,11 @@ export default function DevDeckPage() {
 
   const safe = searchParams.get("safe") === "1";
   const fx = searchParams.get("fx") !== "0";
+
+  const [enterToken, setEnterToken] = useState("");
+  const [entering, setEntering] = useState(false);
+  const [enterError, setEnterError] = useState<string | null>(null);
+  const [frameNonce, setFrameNonce] = useState(0);
 
   const urls = useMemo(() => {
     const codeEnc = encodeURIComponent(code);
@@ -31,6 +51,23 @@ export default function DevDeckPage() {
       participant: `/s/${codeEnc}`,
     };
   }, [code, fx, safe]);
+
+  async function enter() {
+    const token = enterToken.trim();
+    if (!token) return;
+    setEntering(true);
+    setEnterError(null);
+    try {
+      const res = await postJson<InviteEnterResponse>("/api/invite/enter", { token });
+      if (!res.ok) throw new Error(res.error ?? "enter failed");
+      setFrameNonce((n) => n + 1);
+      setEnterToken("");
+    } catch (err) {
+      setEnterError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setEntering(false);
+    }
+  }
 
   if (!code.trim()) {
     return (
@@ -67,6 +104,20 @@ export default function DevDeckPage() {
           </div>
         </div>
 
+        <div className="mt-4">
+          <Card className="p-3">
+            <div className="text-sm font-semibold">入室（招待token）</div>
+            <div className="mt-1 text-xs text-neutral-500">Admin/Mod 招待リンク（/i/:token）の token を貼り付けて入室（cookie付与）します。</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Input className="min-w-[280px] flex-1" value={enterToken} onChange={(e) => setEnterToken(e.target.value)} placeholder="token を貼り付け" />
+              <Button disabled={entering || enterToken.trim().length === 0} onClick={() => void enter()} size="sm" variant="primary">
+                {entering ? "入室中..." : "入室してデッキ更新"}
+              </Button>
+            </div>
+            {enterError && <div className="mt-2 text-xs text-red-300">入室に失敗: {enterError}</div>}
+          </Card>
+        </div>
+
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           <Card className="p-3">
             <div className="flex items-center justify-between gap-2">
@@ -76,7 +127,7 @@ export default function DevDeckPage() {
               </a>
             </div>
             <div className="mt-3 aspect-[16/9] w-full overflow-hidden rounded-md border border-neutral-800 bg-black">
-              <iframe className="h-full w-full" src={urls.ten} title="display-ten" />
+              <iframe key={`ten:${frameNonce}`} className="h-full w-full" src={urls.ten} title="display-ten" />
             </div>
           </Card>
 
@@ -88,7 +139,7 @@ export default function DevDeckPage() {
               </a>
             </div>
             <div className="mt-3 aspect-[16/9] w-full overflow-hidden rounded-md border border-neutral-800 bg-black">
-              <iframe className="h-full w-full" src={urls.one} title="display-one" />
+              <iframe key={`one:${frameNonce}`} className="h-full w-full" src={urls.one} title="display-one" />
             </div>
           </Card>
         </div>
@@ -102,7 +153,7 @@ export default function DevDeckPage() {
               </a>
             </div>
             <div className="mt-3 h-[44vh] min-h-[420px] w-full overflow-hidden rounded-md border border-neutral-800 bg-neutral-950">
-              <iframe className="h-full w-full" src={urls.admin} title="admin" />
+              <iframe key={`admin:${frameNonce}`} className="h-full w-full" src={urls.admin} title="admin" />
             </div>
             <div className="mt-2 text-xs text-neutral-500">音を出すには、上のAdmin内で「音を有効化」をクリックしてください（ブラウザ制約）。</div>
           </Card>
@@ -126,4 +177,3 @@ export default function DevDeckPage() {
     </main>
   );
 }
-

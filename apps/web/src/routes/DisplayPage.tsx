@@ -477,104 +477,45 @@ export default function DisplayPage() {
     }
     sidePlayers.push(playerById.get(id) ?? spotlightCacheRef.current.get(id) ?? null);
   }
-  const emptySlots = sidePlayers.filter((p) => !p).length;
-
-  const sideCards: ReactNode[] = [];
-  let emptyRank = 0;
-  for (let i = 0; i < 3; i += 1) {
-    const p = sidePlayers[i] ?? null;
-    if (p) {
-      sideCards.push(
-        <div key={`spotlight:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-          <div className="flex items-center justify-between gap-3">
-            <div className="truncate text-xl font-bold text-pit-text-main text-glow">{p.displayName}</div>
-            {p.progress.isBingo && <Badge variant="success" className="animate-pulse">BINGO</Badge>}
-          </div>
-          {p.card ? (
-            <div className="mt-3">
-              <BingoCard card={p.card} drawnNumbers={drawnNumbers} showHeaders={false} className="max-w-none" />
-            </div>
-          ) : (
-            <div className="mt-3 text-sm text-pit-text-dim">NO CARD DATA</div>
-          )}
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-pit-text-dim">
-            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
-              <div className="text-[0.65rem] text-pit-text-muted">MIN</div>
-              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.minMissingToLine}</div>
-            </div>
-            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
-              <div className="text-[0.65rem] text-pit-text-muted">REACH</div>
-              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.reachLines}</div>
-            </div>
-            <div className="border border-pit-border bg-pit-bg/80 px-2 py-2">
-              <div className="text-[0.65rem] text-pit-text-muted">LINES</div>
-              <div className="mt-1 font-mono text-base text-pit-primary">{p.progress.bingoLines}</div>
-            </div>
-          </div>
-        </div>,
-      );
-      continue;
-    }
-
-    const rank = emptyRank;
-    emptyRank += 1;
-    if (rank === 0) {
-      sideCards.push(
-        <div key={`stats-detail:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-          <div className="text-xs text-pit-text-muted">STATS_DETAIL_DUMP</div>
-          <div className="mt-2 grid gap-1 text-sm text-pit-text-dim">
-            <div>
-              [0]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
-            </div>
-            <div>
-              [1]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
-            </div>
-            <div>
-              [2]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
-            </div>
-            <div>
-              [3+]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
-            </div>
-          </div>
-        </div>,
-      );
-      continue;
-    }
-
-    if (rank === 1) {
-      sideCards.push(
-        <div key={`recent:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-          <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {(view?.lastNumbers ?? []).slice().reverse().slice(0, 8).map((n, idx) => (
-              <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
-                {n}
-              </div>
-            ))}
-            {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
-          </div>
-        </div>,
-      );
-      continue;
-    }
-
-    sideCards.push(
-      <div key={`stats-core:${i}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-        <div className="text-xs text-pit-text-muted">CORE_STATS</div>
-        <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
-          <div>
-            DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
-          </div>
-          <div>
-            REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
-          </div>
-          <div>
-            BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
-          </div>
+  const sideCards: ReactNode[] = sidePlayers.map((p, idx) => {
+    if (!p) {
+      return (
+        <div key={`spotlight-empty:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/60 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.4)]">
+          <div className="text-xs text-pit-text-muted">SPOTLIGHT</div>
+          <div className="mt-3 text-sm text-pit-text-dim">EMPTY</div>
         </div>
-      </div>,
+      );
+    }
+
+    return (
+      <div key={`spotlight:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-3 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="truncate text-base font-bold text-pit-text-main text-glow">{p.displayName}</div>
+          {p.progress.isBingo && (
+            <Badge variant="success" className="shrink-0">
+              BINGO
+            </Badge>
+          )}
+        </div>
+        {p.card ? (
+          <div className="mt-2">
+            <BingoCard
+              variant="compact"
+              card={p.card}
+              drawnNumbers={drawnNumbers}
+              showHeaders={false}
+              className="mx-auto max-w-[180px]"
+            />
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-pit-text-dim">NO CARD DATA</div>
+        )}
+        <div className="mt-2 text-[0.7rem] text-pit-text-dim">
+          MIN:{p.progress.minMissingToLine} / REACH:{p.progress.reachLines}
+        </div>
+      </div>
     );
-  }
+  });
 
   const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
   const glitchClass = glitch ? "glitch-active" : "";
@@ -709,61 +650,20 @@ export default function DisplayPage() {
         </div>
       )}
 
-      <div className="relative z-20 grid min-h-dvh grid-cols-1 gap-6 px-6 pb-10 pt-20 lg:grid-cols-[minmax(0,340px)_1fr_minmax(0,340px)] lg:items-stretch">
-        {/* Outer side: spotlight (or detailed stats) */}
-        {screen === "ten" ? (
-          <aside className="grid gap-4 lg:order-1">
-            {sideCards}
-          </aside>
-        ) : (
-          <aside className="grid gap-4 lg:order-1">
-            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-              <div className="text-xs text-pit-text-muted">CORE_STATS</div>
-              <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
-                <div>
-                  DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
-                </div>
-                <div>
-                  REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
-                </div>
-                <div>
-                  BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-              <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
-                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
-                    {n}
-                  </div>
-                ))}
-                {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
-              </div>
-            </div>
-            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-              <div className="text-xs text-pit-text-muted">SPOTLIGHT_META</div>
-              <div className="mt-2 text-sm text-pit-text-dim">
-                v{fmtNum(view?.spotlight?.version)} / {view?.spotlight?.updatedBy ?? "—"} /{" "}
-                {view?.spotlight?.updatedAt ? relativeFromNow(view.spotlight.updatedAt) : "—"}
-              </div>
-              <div className="mt-3 grid gap-2">
-                {sidePlayers.map((p, idx) => (
-                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-2 text-sm text-pit-text-main">
-                    {p?.displayName ?? "VOID_SLOT"}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
-        )}
+	      <div
+	        className={cn(
+	          "relative z-20 grid grid-cols-1 gap-4 px-6 pb-4 pt-16 lg:h-dvh lg:items-stretch",
+	          screen === "ten" ? "lg:grid-cols-[minmax(0,280px)_1fr]" : "lg:grid-cols-[1fr_minmax(0,280px)]",
+	        )}
+	      >
+	        {/* Spotlight (outer side) */}
+	        {screen === "ten" && <aside className="grid min-h-0 gap-3 lg:order-1">{sideCards}</aside>}
 
-        {/* Center: reel */}
-        <div className={cn("flex items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
-          <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
-            <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
-	                <div
+	        {/* Center: reel */}
+	        <div className={cn("flex min-h-0 items-center justify-center lg:order-2", screen === "ten" ? "lg:justify-end" : "lg:justify-start")}>
+	          <div className={cn("text-center", screen === "ten" ? "lg:text-right" : "lg:text-left")}>
+	            <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
+		                <div
 	                  className={cn(
 	                    "relative isolate overflow-hidden border p-[1.8vw]",
 	                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
@@ -829,71 +729,18 @@ export default function DisplayPage() {
 	                {(view?.reel?.status ?? "idle").toUpperCase()}
 	              </span>{" "}
 	              <span className="mx-2">|</span> LAST_IDX :: <span className="font-mono text-pit-text-main">{view?.lastNumber ?? "—"}</span>
-	            </div>
-            {view?.sessionStatus === "ended" && (
-              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
-                SESSION_TERMINATED
+		            </div>
+	            {view?.sessionStatus === "ended" && (
+	              <div className="mt-4 border border-pit-danger bg-pit-danger/10 p-3 text-sm text-pit-danger font-bold tracking-widest">
+	                SESSION_TERMINATED
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Inner side: stats core / spotlight */}
-        {screen === "ten" ? (
-          <aside className="grid gap-4 lg:order-3">
-            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-              <div className="text-xs text-pit-text-muted">CORE_STATS</div>
-              <div className="mt-3 grid gap-2 text-sm text-pit-text-main">
-                <div>
-                  DRAW: <span className="font-mono text-pit-primary">{view?.drawCount ?? "—"}</span> / 75
-                </div>
-                <div>
-                  REACH: <span className="font-mono text-pit-primary">{view?.stats?.reachPlayers ?? "—"}</span>
-                </div>
-                <div>
-                  BINGO: <span className="font-mono text-pit-primary">{view?.stats?.bingoPlayers ?? "—"}</span>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-              <div className="text-xs text-pit-text-muted">RECENT_LOG</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {(view?.lastNumbers ?? []).slice().reverse().map((n, idx) => (
-                  <div key={idx} className="border border-pit-border bg-pit-bg/80 px-3 py-1 text-sm font-mono text-pit-primary">
-                    {n}
-                  </div>
-                ))}
-                {!view?.lastNumbers?.length && <div className="text-sm text-pit-text-dim">NO_DATA</div>}
-              </div>
-            </div>
-            {emptySlots > 0 && (
-              <div className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-                <div className="text-xs text-pit-text-muted">STATS_DETAIL_DUMP</div>
-                <div className="mt-2 grid gap-1 text-sm text-pit-text-dim">
-                  <div>
-                    [0]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["0"] ?? "—"}</span>
-                  </div>
-                  <div>
-                    [1]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["1"] ?? "—"}</span>
-                  </div>
-                  <div>
-                    [2]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["2"] ?? "—"}</span>
-                  </div>
-                  <div>
-                    [3+]: <span className="font-mono text-pit-text-main">{view?.stats?.minMissingHistogram?.["3plus"] ?? "—"}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </aside>
-        ) : (
-          <aside className="grid gap-4 lg:order-3">
-            {sideCards}
-          </aside>
-        )}
-      </div>
-      </div>
-    </main>
-    </div>
-  );
+	          </div>
+	        </div>
+	        {screen === "one" && <aside className="grid min-h-0 gap-3 lg:order-3">{sideCards}</aside>}
+	      </div>
+	      </div>
+	    </main>
+	    </div>
+	  );
 }

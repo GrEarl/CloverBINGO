@@ -340,7 +340,9 @@ export default function AdminPage() {
     try {
       const res = await postJson<InviteEnterResponse>("/api/invite/enter", { token });
       if (!res.ok) throw new Error(res.error ?? "enter failed");
-      window.location.replace(res.redirectTo);
+      const next = new URL(res.redirectTo, window.location.origin);
+      if (devMode) next.searchParams.set("dev", "1");
+      window.location.replace(next.pathname + next.search);
     } catch (err) {
       setEnterError(err instanceof Error ? err.message : "unknown error");
     } finally {

@@ -814,17 +814,20 @@ export class SessionDurableObject {
     const db = getDb(this.env);
     const createdAt = isoNow();
     const joinedAt = Date.parse(createdAt) || nowMs();
-    const rows: Array<{
-      id: string;
-      sessionId: string;
-      deviceId: string;
-      status: ParticipantStatus;
-      displayName: string;
-      cardJson: string;
-      createdAt: string;
-      disabledAt: null;
-      disabledReason: null;
-      disabledBy: null;
+    const toInsert: Array<{
+      row: {
+        id: string;
+        sessionId: string;
+        deviceId: string;
+        status: ParticipantStatus;
+        displayName: string;
+        cardJson: string;
+        createdAt: string;
+        disabledAt: null;
+        disabledReason: null;
+        disabledBy: null;
+      };
+      player: PlayerState;
     }> = [];
 
     for (let i = 0; i < addCount; i += 1) {
@@ -832,32 +835,44 @@ export class SessionDurableObject {
       const displayName = clampDisplayName(`${prefix}${String(existing + i + 1).padStart(3, "0")}`) ?? `${prefix}${existing + i + 1}`;
       const deviceId = clampDeviceId(`dev:${this.session.id}:${id}`) ?? `dev:${this.session.id}:${id}`.slice(0, 64);
       const card = generate75BallCard();
-      rows.push({
-        id,
-        sessionId: this.session.id,
-        deviceId,
-        status: "active",
-        displayName,
-        cardJson: JSON.stringify(card),
-        createdAt,
-        disabledAt: null,
-        disabledReason: null,
-        disabledBy: null,
+      toInsert.push({
+        row: {
+          id,
+          sessionId: this.session.id,
+          deviceId,
+          status: "active",
+          displayName,
+          cardJson: JSON.stringify(card),
+          createdAt,
+          disabledAt: null,
+          disabledReason: null,
+          disabledBy: null,
+        },
+        player: {
+          id,
+          status: "active",
+          displayName,
+          joinedAt,
+          disabledAt: null,
+          disabledReason: null,
+          disabledBy: null,
+          card,
+          progress: evaluateCard(card, this.drawnNumbers),
+        },
       });
-      this.players[id] = {
-        id,
-        status: "active",
-        displayName,
-        joinedAt,
-        disabledAt: null,
-        disabledReason: null,
-        disabledBy: null,
-        card,
-        progress: evaluateCard(card, this.drawnNumbers),
-      };
     }
 
-    await db.insert(participants).values(rows);
+    // NOTE: Drizzle(D1) multi-row insert can fail in some environments; keep this dev-only path robust
+    // by inserting row-by-row (max 200).
+    try {
+      for (const item of toInsert) {
+        await db.insert(participants).values(item.row);
+        this.players[item.player.id] = item.player;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "failed to seed participants";
+      return textResponse(`seed failed: ${msg}`, { status: 500 });
+    }
 
     this.refreshPendingDrawImpact();
     this.touch();

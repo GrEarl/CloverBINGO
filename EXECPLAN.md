@@ -69,6 +69,7 @@
 - [x] (2025-12-17 16:46Z) Admin 音量デフォルトを「BGM=0.75 / SFX=0.75」に合わせた（localStorageの初期値。既存ユーザーの保存値は尊重）。
 - [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: テスト用セッション機能（Admin `?dev=1`）として「ダミー参加者の大量投入」「演出強度（reach強度）の override（0..3 / AUTO）」「次の当選番号の強制prepare」「状態リセット（revive含む）」を追加し、実機に近い演出確認を“端末を何台も用意せず”に行えるようにした（Worker/DO: `/api/admin/dev/*`）。
 - [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: 1モニターで検証し切れるように `/s/:code/dev`（Devデッキ: display ten/one + admin を同一画面に集約）と、セッション無しで演出を触れる `/showcase`（演出ショーケース）を追加した。
+- [x] (2025-12-18 20:42Z) 実機フィードバック対応: DevTools の `dev.seed` が本番で 500 になる問題を修正（D1/Drizzle の multi-row insert が環境により失敗し得るため、dev用途は 1行ずつ insert に変更）。あわせて Devデッキに「入室（招待token）」導線と iframe 再読込を追加し、Display は内側（統計）の重複表示を撤去して “数字/スポットライト” に寄せつつ、縦方向に見切れないようレイアウトを詰めた。
 
 ## Surprises & Discoveries
 
@@ -86,6 +87,7 @@
 - 要件の再確認により「Modでセッションを無効化/復帰」そのものが不要になったため、ended セッションの招待入室（cookie付与）を許可する構成は撤去し、通常通り ended では `/api/invite/enter` を拒否する。
 - 演出（Display）向けの全体CSS変更で `html, body { overflow:hidden; }` が入ると Admin/Mod/Participant の縦スクロールができなくなり、結果として音の有効化などの操作に影響し得る。さらに Tailwind v4 の `@config` 削除は `pit-*` 系ユーティリティ未生成（黒地に黒文字）を再発させ得るため、共有CSSは慎重に扱う必要がある。
 - `apps/worker/scripts/ws-load.mjs` は `participant/join` が `deviceId` 必須になった後に更新されておらず、現状のままだと join が 400 になり負荷確認ができなかった（dev/test整備の一環として `deviceId` を送るように修正）。
+- D1/Drizzle で dev用途の multi-row insert が本番環境で 500 になり得た（原因の詳細ログは Cloudflare 側だが、回避として `INSERT` を 1行ずつにすると再現しなかった）。
 
 ## Decision Log
 
@@ -163,6 +165,9 @@
   Date/Author: 2025-12-17 / codex
 - Decision: DevTools の「白熱度調整」は抽選履歴を探索して `reachPlayers` を狙い撃ちするのではなく、DO内の `fx.intensityOverride` により演出強度（テンポ/テーマ）を直接上書きできるようにする。
   Rationale: 200人×候補番号の探索は DO の CPU を食いやすく、`reachLines` は非単調で狙い撃ちも難しい。会場演出確認の目的（テンポ/FX段階の検証）には override の方が再現性が高い。
+  Date/Author: 2025-12-18 / codex
+- Decision: 会場表示（Display ten/one）は 2画面運用前提のため、統計は原則表示しない（重複しやすく、数字の可読性を落とす）。会場表示は “数字 + スポットライト（カード）” に寄せる。
+  Rationale: 遠距離視認性と演出の主役（数字）を最優先し、情報過多による視線移動と見切れリスクを減らすため。
   Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective
