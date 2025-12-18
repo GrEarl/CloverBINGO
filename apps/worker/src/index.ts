@@ -207,6 +207,38 @@ app.post("/api/admin/end", async (c) => {
   return forwardToSession(c, session, "/admin/end");
 });
 
+app.post("/api/admin/dev/seed", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/dev/seed");
+});
+
+app.post("/api/admin/dev/reset", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/dev/reset");
+});
+
+app.post("/api/admin/dev/tune", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/dev/tune");
+});
+
+app.post("/api/admin/dev/prepare", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/dev/prepare");
+});
+
 app.post("/api/mod/enter", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);

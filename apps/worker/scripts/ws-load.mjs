@@ -113,10 +113,11 @@ async function main() {
 
   process.stdout.write("trigger: participant/join (broadcast snapshot)\n");
   const joinName = `load_${Date.now().toString(36)}`;
+  const deviceId = `wsload:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
   const joinRes = await fetch(`${args.origin}/api/participant/join?code=${encodeURIComponent(args.code)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: joinName }),
+    body: JSON.stringify({ displayName: joinName, deviceId }),
   });
   if (!joinRes.ok) {
     const text = await joinRes.text();
@@ -145,4 +146,3 @@ main().catch((err) => {
   process.stderr.write(String(err?.stack ?? err) + "\n");
   process.exit(1);
 });
-

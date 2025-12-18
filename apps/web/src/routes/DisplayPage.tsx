@@ -154,12 +154,13 @@ export default function DisplayPage() {
   const screenDigit: ReelDigit = screen === "one" ? "one" : "ten";
   const otherDigit: ReelDigit = screenDigit === "ten" ? "one" : "ten";
   const reachCount = view?.stats?.reachPlayers ?? null;
-  const reachIntensity = reachIntensityFromCount(reachCount);
-  const visualReachIntensity: ReachIntensity = safeMode ? (Math.min(1, reachIntensity) as ReachIntensity) : reachIntensity;
+  const actualReachIntensity: ReachIntensity = (view?.fx?.actualReachIntensity ?? reachIntensityFromCount(reachCount)) as ReachIntensity;
+  const effectiveReachIntensity: ReachIntensity = (view?.fx?.effectiveReachIntensity ?? actualReachIntensity) as ReachIntensity;
+  const visualReachIntensity: ReachIntensity = safeMode ? (Math.min(1, effectiveReachIntensity) as ReachIntensity) : effectiveReachIntensity;
   const drawSpinning = view?.drawState === "spinning";
   const tensionLevel: ReachIntensity = fxActive && drawSpinning ? visualReachIntensity : 0;
   const tensionTheme = tensionLevel === 3 ? "rainbow" : tensionLevel === 2 ? "red" : tensionLevel === 1 ? "yellow" : "calm";
-  const isSpinning = view?.reel.status === "spinning";
+  const isSpinning = view?.reel?.status === "spinning";
   const isLastSpinning = Boolean(isSpinning && reelSignal[otherDigit] === "stopped");
   
   // Spin speed: slow down in safe/reduced-motion mode to reduce motion and CPU load.
@@ -391,7 +392,7 @@ export default function DisplayPage() {
       timerRef.current = null;
     }
     setShownDigit(view.reel.digit);
-  }, [view?.reel.status, view?.reel.digit, connected, spinIntervalMs]);
+  }, [view?.reel?.status, view?.reel?.digit, connected, spinIntervalMs]);
 
   useEffect(() => {
     return () => {
@@ -430,7 +431,7 @@ export default function DisplayPage() {
 
   useEffect(() => {
     const prev = prevReelStatusRef.current;
-    const next = view?.reel.status ?? null;
+    const next = view?.reel?.status ?? null;
     if (prev === "spinning" && next === "stopped") {
       setPopDigit(true);
       if (popTimerRef.current) window.clearTimeout(popTimerRef.current);
@@ -440,7 +441,7 @@ export default function DisplayPage() {
     return () => {
       if (popTimerRef.current) window.clearTimeout(popTimerRef.current);
     };
-  }, [view?.reel.status]);
+  }, [view?.reel?.status]);
 
   async function goFullscreen() {
     try {
@@ -819,10 +820,10 @@ export default function DisplayPage() {
 	              <span
 	                className={cn(
 	                  "text-pit-text-main",
-	                  view?.reel.status === "spinning" && tensionTheme === "yellow" && "text-pit-primary animate-pulse",
-	                  view?.reel.status === "spinning" && tensionTheme === "red" && "text-pit-danger animate-pulse",
-	                  view?.reel.status === "spinning" && tensionTheme === "rainbow" && "rainbow-text rainbow-pan animate-pulse",
-	                  view?.reel.status === "spinning" && tensionTheme === "calm" && "animate-pulse",
+	                  view?.reel?.status === "spinning" && tensionTheme === "yellow" && "text-pit-primary animate-pulse",
+	                  view?.reel?.status === "spinning" && tensionTheme === "red" && "text-pit-danger animate-pulse",
+	                  view?.reel?.status === "spinning" && tensionTheme === "rainbow" && "rainbow-text rainbow-pan animate-pulse",
+	                  view?.reel?.status === "spinning" && tensionTheme === "calm" && "animate-pulse",
 	                )}
 	              >
 	                {(view?.reel?.status ?? "idle").toUpperCase()}

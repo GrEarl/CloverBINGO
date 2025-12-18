@@ -67,6 +67,8 @@
 - [x] (2025-12-17 08:24Z) `npx tsc -p apps/web/tsconfig.json --noEmit` と `npm -w apps/web run build` を通し、音源（OGG）が dist にコピーされ参照パスが一致していることを確認した。
 - [x] (2025-12-17 16:46Z) reach強度（`reachPlayers` → 0..3）に応じて会場表示（ten/one）の「カラーテーマ/演出強度」を段階的に切り替えた（強度1=黄、強度2=赤＋演出増、強度3=虹＋演出/振動/パーティクル増）。安全モード（`?safe=1` / reduced-motion / WS非接続）では強いフラッシュや過度な点滅・色変化を抑制する（safeMode時は強度を最大1へクランプ）。
 - [x] (2025-12-17 16:46Z) Admin 音量デフォルトを「BGM=0.75 / SFX=0.75」に合わせた（localStorageの初期値。既存ユーザーの保存値は尊重）。
+- [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: テスト用セッション機能（Admin `?dev=1`）として「ダミー参加者の大量投入」「演出強度（reach強度）の override（0..3 / AUTO）」「次の当選番号の強制prepare」「状態リセット（revive含む）」を追加し、実機に近い演出確認を“端末を何台も用意せず”に行えるようにした（Worker/DO: `/api/admin/dev/*`）。
+- [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: 1モニターで検証し切れるように `/s/:code/dev`（Devデッキ: display ten/one + admin を同一画面に集約）と、セッション無しで演出を触れる `/showcase`（演出ショーケース）を追加した。
 
 ## Surprises & Discoveries
 
@@ -83,6 +85,7 @@
 - Workers の静的アセット配信で SPA ルート（例：`/s/:code`）が 404 になり得るため、assets の `not_found_handling = "single-page-application"` を有効化する必要があった（API は `/api/*` を Worker 優先にする）。
 - 要件の再確認により「Modでセッションを無効化/復帰」そのものが不要になったため、ended セッションの招待入室（cookie付与）を許可する構成は撤去し、通常通り ended では `/api/invite/enter` を拒否する。
 - 演出（Display）向けの全体CSS変更で `html, body { overflow:hidden; }` が入ると Admin/Mod/Participant の縦スクロールができなくなり、結果として音の有効化などの操作に影響し得る。さらに Tailwind v4 の `@config` 削除は `pit-*` 系ユーティリティ未生成（黒地に黒文字）を再発させ得るため、共有CSSは慎重に扱う必要がある。
+- `apps/worker/scripts/ws-load.mjs` は `participant/join` が `deviceId` 必須になった後に更新されておらず、現状のままだと join が 400 になり負荷確認ができなかった（dev/test整備の一環として `deviceId` を送るように修正）。
 
 ## Decision Log
 
@@ -158,6 +161,9 @@
 - Decision: Mod の「無効化/復帰」はセッション単位ではなく参加者単位で実装する（D1 `participants.status = active|disabled`）。disabled の参加者は統計/新規BINGO/スポットライト対象から除外するが、カードの進捗計算自体は更新し続け、復帰時に整合するようにする。
   Rationale: 要件は「不正/重複した参加者だけを判定から弾きたい」であり、セッション全体を止める必要がないため。除外対象でも復帰できるよう進捗更新は維持する。
   Date/Author: 2025-12-17 / codex
+- Decision: DevTools の「白熱度調整」は抽選履歴を探索して `reachPlayers` を狙い撃ちするのではなく、DO内の `fx.intensityOverride` により演出強度（テンポ/テーマ）を直接上書きできるようにする。
+  Rationale: 200人×候補番号の探索は DO の CPU を食いやすく、`reachLines` は非単調で狙い撃ちも難しい。会場演出確認の目的（テンポ/FX段階の検証）には override の方が再現性が高い。
+  Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective
 
@@ -296,6 +302,10 @@ Admin の音響仕様（このExecPlanでの合意）:
   - `POST /api/participant/join?code=<sessionCode>`（displayName→playerId+card）
 - Admin:
   - `POST /api/admin/prepare?code=<sessionCode>`
+  - `POST /api/admin/dev/seed?code=<sessionCode>`（Admin `?dev=1` でのみUIに露出。ダミー参加者を追加）
+  - `POST /api/admin/dev/reset?code=<sessionCode>`（Admin `?dev=1`。参加者/抽選履歴を削除し、必要なら active に戻す）
+  - `POST /api/admin/dev/tune?code=<sessionCode>`（Admin `?dev=1`。演出強度 override を設定/解除）
+  - `POST /api/admin/dev/prepare?code=<sessionCode>`（Admin `?dev=1`。次番号を強制prepare）
   - `POST /api/admin/reel?code=<sessionCode>`（action=`go`。十の位/一の位を同時に回転開始し、各桁はサーバ側でランダム時間後に自動停止→両方停止で commit）
   - `POST /api/admin/end?code=<sessionCode>`
 - Mod:
@@ -325,3 +335,4 @@ Admin の音響仕様（このExecPlanでの合意）:
 - 2025-12-16 11:20Z: `apps/web` の音響実装と `apps/worker` の停止時間レンジを更新し、型チェック/ビルド/テストで成立を確認した。
 - 2025-12-16 21:00Z: 会場表示（ten/one）の演出要件が `DESING.md` として追加されたため、Progress/Context/Acceptance/Decision を更新し、この仕様に追従する実装を開始する。
 - 2025-12-17 02:01Z: Cloudflare 実デプロイで判明した制約（Freeプランの `new_sqlite_classes` 必須、SPA ルート 404 回避）に追従し、あわせて `account_id` / `database_id` を `wrangler.local.toml`（gitignore）へ分離して GitHub へ push できる形に整理した。
+- 2025-12-18 19:57Z: 開発効率化のため、Admin `?dev=1` の DevTools（ダミー投入/演出強度override/強制prepare/リセット）と、`/s/:code/dev`（1画面デッキ）・`/showcase`（セッション不要の演出ショーケース）を追加した。合わせて、`ws-load` の join が `deviceId` 必須化で壊れていたのを修正し、演出強度 override を snapshot (`fx`) とサーバ側テンポにも反映するようにした。

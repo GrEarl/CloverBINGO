@@ -256,6 +256,7 @@ export class SessionDurableObject {
   private pendingDraw: PendingDrawState | null = null;
 
   // volatile (do not persist)
+  private devFxIntensityOverride: ReachIntensity | null = null;
   private spotlight: SpotlightState = defaultSpotlightState(nowMs());
 
   constructor(private readonly state: DurableObjectState, private readonly env: Bindings) {}
@@ -395,6 +396,8 @@ export class SessionDurableObject {
 
     const computed = shared ?? this.createSnapshotShared();
     const { stats, lastNumber, lastNumbers, spotlightPlayers } = computed;
+    const actualReachIntensity = reachIntensityFromCount(stats.reachPlayers);
+    const effectiveReachIntensity = this.devFxIntensityOverride ?? actualReachIntensity;
 
     const base = {
       type: "snapshot",
@@ -407,6 +410,11 @@ export class SessionDurableObject {
       lastNumber,
       lastNumbers,
       stats,
+      fx: {
+        actualReachIntensity,
+        effectiveReachIntensity,
+        intensityOverride: this.devFxIntensityOverride,
+      },
       spotlight: {
         ...this.spotlight,
         players: spotlightPlayers,
@@ -690,6 +698,211 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true, pendingDraw: ensured });
   }
 
+  private async handleAdminDevPrepare(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+
+    if (this.pendingDraw && (this.pendingDraw.reel.ten === "spinning" || this.pendingDraw.reel.one === "spinning")) {
+      return textResponse("spinning; cannot prepare", { status: 409 });
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const raw = (body as { number?: unknown }).number;
+    const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+    const number = Number.isFinite(n) ? Math.floor(n) : NaN;
+    if (!Number.isFinite(number) || number < 1 || number > 75) return textResponse("number must be 1..75", { status: 400 });
+    if (this.drawnNumbers.includes(number)) return textResponse("number already drawn", { status: 409 });
+
+    const preparedAt = nowMs();
+    this.pendingDraw = {
+      number,
+      preparedAt,
+      impact: computeImpact(this.players, this.drawnNumbers, number),
+      state: "prepared",
+      reel: { ten: "idle", one: "idle" },
+      stoppedDigits: { ten: null, one: null },
+    };
+
+    this.broadcastEvent(
+      (a) => a?.role === "admin",
+      { type: "draw.prepared", number, preparedAt, impact: this.pendingDraw.impact },
+    );
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, pendingDraw: this.pendingDraw });
+  }
+
+  private async handleAdminDevTune(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+
+    if (this.pendingDraw && (this.pendingDraw.reel.ten === "spinning" || this.pendingDraw.reel.one === "spinning")) {
+      return textResponse("spinning; cannot tune", { status: 409 });
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const raw = (body as { targetIntensity?: unknown }).targetIntensity;
+    if (raw === null || typeof raw === "undefined") {
+      this.devFxIntensityOverride = null;
+    } else {
+      const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number.parseInt(raw, 10) : NaN;
+      const v = Number.isFinite(n) ? Math.floor(n) : NaN;
+      if (v !== 0 && v !== 1 && v !== 2 && v !== 3) return textResponse("targetIntensity must be 0..3 (or null)", { status: 400 });
+      this.devFxIntensityOverride = v as ReachIntensity;
+    }
+
+    this.touch();
+    this.broadcastSnapshots();
+
+    return jsonResponse({
+      ok: true,
+      intensityOverride: this.devFxIntensityOverride,
+      actualReachIntensity: reachIntensityFromCount(this.createSnapshotShared().stats.reachPlayers),
+    });
+  }
+
+  private async handleAdminDevSeed(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+    if (!this.session) return textResponse("session not found", { status: 404 });
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const rawCount = (body as { count?: unknown }).count;
+    const n = typeof rawCount === "number" ? rawCount : typeof rawCount === "string" ? Number.parseInt(rawCount, 10) : NaN;
+    const requested = Number.isFinite(n) ? Math.floor(n) : NaN;
+    if (!Number.isFinite(requested) || requested <= 0) return textResponse("count must be > 0", { status: 400 });
+
+    const rawPrefix = (body as { prefix?: unknown }).prefix;
+    const prefix = typeof rawPrefix === "string" && rawPrefix.trim() ? rawPrefix.trim().slice(0, 12) : "DEV";
+
+    const maxPlayers = 200;
+    const existing = Object.keys(this.players).length;
+    const capacity = Math.max(0, maxPlayers - existing);
+    const addCount = Math.min(requested, capacity);
+    if (addCount <= 0) return jsonResponse({ ok: true, added: 0, total: existing, maxPlayers });
+
+    const db = getDb(this.env);
+    const createdAt = isoNow();
+    const joinedAt = Date.parse(createdAt) || nowMs();
+    const rows: Array<{
+      id: string;
+      sessionId: string;
+      deviceId: string;
+      status: ParticipantStatus;
+      displayName: string;
+      cardJson: string;
+      createdAt: string;
+      disabledAt: null;
+      disabledReason: null;
+      disabledBy: null;
+    }> = [];
+
+    for (let i = 0; i < addCount; i += 1) {
+      const id = crypto.randomUUID();
+      const displayName = clampDisplayName(`${prefix}${String(existing + i + 1).padStart(3, "0")}`) ?? `${prefix}${existing + i + 1}`;
+      const deviceId = clampDeviceId(`dev:${this.session.id}:${id}`) ?? `dev:${this.session.id}:${id}`.slice(0, 64);
+      const card = generate75BallCard();
+      rows.push({
+        id,
+        sessionId: this.session.id,
+        deviceId,
+        status: "active",
+        displayName,
+        cardJson: JSON.stringify(card),
+        createdAt,
+        disabledAt: null,
+        disabledReason: null,
+        disabledBy: null,
+      });
+      this.players[id] = {
+        id,
+        status: "active",
+        displayName,
+        joinedAt,
+        disabledAt: null,
+        disabledReason: null,
+        disabledBy: null,
+        card,
+        progress: evaluateCard(card, this.drawnNumbers),
+      };
+    }
+
+    await db.insert(participants).values(rows);
+
+    this.refreshPendingDrawImpact();
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, added: addCount, total: Object.keys(this.players).length, maxPlayers });
+  }
+
+  private async handleAdminDevReset(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+    if (!this.session) return textResponse("session not found", { status: 404 });
+
+    if (this.pendingDraw && (this.pendingDraw.reel.ten === "spinning" || this.pendingDraw.reel.one === "spinning")) {
+      return textResponse("spinning; cannot reset", { status: 409 });
+    }
+
+    let body: unknown = null;
+    try {
+      body = await request.json();
+    } catch {
+      body = null;
+    }
+    const revive = Boolean((body as { revive?: unknown } | null)?.revive ?? true);
+
+    const db = getDb(this.env);
+    await db.delete(drawCommits).where(eq(drawCommits.sessionId, this.session.id));
+    await db.delete(participants).where(eq(participants.sessionId, this.session.id));
+    if (revive) {
+      await db.update(sessions).set({ status: "active", endedAt: null }).where(eq(sessions.id, this.session.id));
+      this.session.status = "active";
+      this.session.endedAt = null;
+    }
+
+    this.players = {};
+    this.drawnNumbers = [];
+    this.pendingDraw = null;
+    this.devFxIntensityOverride = null;
+    this.spotlight = defaultSpotlightState(nowMs());
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, revived: revive });
+  }
+
   private async confirmPendingDraw(): Promise<Response | null> {
     if (!this.session || !this.pendingDraw) return null;
 
@@ -775,8 +988,9 @@ export class SessionDurableObject {
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
 
     const reachCount = computeSessionStats(Object.values(this.players).filter((p) => p.status === "active").map((p) => p.progress)).reachPlayers;
-    const reachIntensity = reachIntensityFromCount(reachCount);
-    const timing = spinTimingForIntensity(reachIntensity);
+    const actualIntensity = reachIntensityFromCount(reachCount);
+    const effectiveIntensity = this.devFxIntensityOverride ?? actualIntensity;
+    const timing = spinTimingForIntensity(effectiveIntensity);
 
     const gapMs = randomIntInclusive(timing.gapMinMs, timing.gapMaxMs);
     const firstStopAfterMs = randomIntInclusive(900, timing.totalMaxMs - gapMs);
@@ -1027,6 +1241,10 @@ export class SessionDurableObject {
 
     if (url.pathname === "/participant/join" && request.method === "POST") return this.handleParticipantJoin(request);
     if (url.pathname === "/admin/prepare" && request.method === "POST") return this.handleAdminPrepare(request);
+    if (url.pathname === "/admin/dev/prepare" && request.method === "POST") return this.handleAdminDevPrepare(request);
+    if (url.pathname === "/admin/dev/tune" && request.method === "POST") return this.handleAdminDevTune(request);
+    if (url.pathname === "/admin/dev/seed" && request.method === "POST") return this.handleAdminDevSeed(request);
+    if (url.pathname === "/admin/dev/reset" && request.method === "POST") return this.handleAdminDevReset(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
     if (url.pathname === "/mod/participant/status" && request.method === "POST") return this.handleModParticipantStatus(request);

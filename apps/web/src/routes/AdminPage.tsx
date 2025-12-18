@@ -67,9 +67,34 @@ type BingoAnnounce = {
   index: number;
 };
 
+type ReachIntensity = 0 | 1 | 2 | 3;
+
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));
+}
+
+function reachIntensityFromCount(reachCount: number | null | undefined): ReachIntensity {
+  if (typeof reachCount !== "number" || !Number.isFinite(reachCount)) return 0;
+  if (reachCount <= 1) return 0;
+  if (reachCount <= 4) return 1;
+  if (reachCount <= 8) return 2;
+  return 3;
+}
+
+function spinTimingForIntensity(intensity: ReachIntensity): { totalMaxMs: number; gapMinMs: number; gapMaxMs: number } {
+  const totalMaxMs = [3000, 3600, 4200, 4800][intensity];
+  const teaseDelayMin = [0, 150, 250, 450][intensity];
+  const teaseDelayMax = [0, 250, 450, 650][intensity];
+  const holdMin = [0, 120, 220, 380][intensity];
+  const holdMax = [0, 220, 380, 520][intensity];
+  const baseGapMin = 350;
+  const baseGapMax = 700;
+  return {
+    totalMaxMs,
+    gapMinMs: baseGapMin + teaseDelayMin + holdMin,
+    gapMaxMs: baseGapMax + teaseDelayMax + holdMax,
+  };
 }
 
 function safeStop(audio: HTMLAudioElement): void {
@@ -164,6 +189,7 @@ export default function AdminPage() {
   const [search] = useSearchParams();
   const code = params.code ?? "";
   const inviteToken = search.get("token") ?? "";
+  const devMode = search.get("dev") === "1";
 
   const { snapshot, status, lastEvent } = useSessionSocket({ role: "admin", code });
   const view = useMemo(() => {
@@ -221,6 +247,18 @@ export default function AdminPage() {
   const canPrepare = Boolean(canOperate && view?.drawState !== "spinning");
   const canGo = Boolean(canOperate && view?.pendingDraw && tenReel === "idle" && oneReel === "idle");
 
+  const reachPlayers = view?.stats?.reachPlayers ?? null;
+  const actualIntensity: ReachIntensity = (view?.fx?.actualReachIntensity ?? reachIntensityFromCount(reachPlayers)) as ReachIntensity;
+  const intensityOverride = (view?.fx?.intensityOverride ?? null) as ReachIntensity | null;
+  const effectiveIntensity: ReachIntensity = (view?.fx?.effectiveReachIntensity ?? (intensityOverride ?? actualIntensity)) as ReachIntensity;
+  const timing = spinTimingForIntensity(effectiveIntensity);
+  const willNewBingo = Boolean(view?.pendingDraw && view?.stats && view.pendingDraw.impact.bingoPlayers > view.stats.bingoPlayers);
+
+  const [devBusy, setDevBusy] = useState(false);
+  const [devSeedCount, setDevSeedCount] = useState("80");
+  const [devSeedPrefix, setDevSeedPrefix] = useState("DEV");
+  const [devForceNumber, setDevForceNumber] = useState("");
+
   async function prepare() {
     setError(null);
     setLastAction("prepare");
@@ -231,6 +269,69 @@ export default function AdminPage() {
     setError(null);
     setLastAction("go");
     await postJson(`/api/admin/reel?code=${encodeURIComponent(code)}`, { action: "go" });
+  }
+
+  async function devSeed() {
+    setError(null);
+    setDevBusy(true);
+    setLastAction("dev.seed");
+    try {
+      await postJson(`/api/admin/dev/seed?code=${encodeURIComponent(code)}`, {
+        count: Number.parseInt(devSeedCount, 10),
+        prefix: devSeedPrefix,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setDevBusy(false);
+    }
+  }
+
+  async function devReset() {
+    setError(null);
+    setDevBusy(true);
+    setLastAction("dev.reset");
+    try {
+      const ok = window.confirm("Dev: 状態をリセットします（参加者/抽選履歴を削除し、必要なら active に戻します）。よろしいですか？");
+      if (!ok) return;
+      await postJson(`/api/admin/dev/reset?code=${encodeURIComponent(code)}`, { revive: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setDevBusy(false);
+    }
+  }
+
+  async function devTune(next: ReachIntensity | null) {
+    setError(null);
+    setDevBusy(true);
+    setLastAction("dev.tune");
+    try {
+      await postJson(`/api/admin/dev/tune?code=${encodeURIComponent(code)}`, { targetIntensity: next });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setDevBusy(false);
+    }
+  }
+
+  async function devPrepareNumber() {
+    setError(null);
+    setDevBusy(true);
+    setLastAction("dev.prepare");
+    try {
+      const num = Number.parseInt(devForceNumber, 10);
+      if (!Number.isFinite(num)) {
+        setError("Dev: number を入力してください（1..75）");
+        return;
+      }
+      await postJson(`/api/admin/dev/prepare?code=${encodeURIComponent(code)}`, { number: num });
+      setDevForceNumber("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setDevBusy(false);
+    }
   }
 
   async function enter(token: string) {
@@ -728,9 +829,101 @@ export default function AdminPage() {
                 <span className="text-neutral-200">{view?.stats?.bingoPlayers ?? "—"}</span>
               </div>
               <div>
+                intensity:{" "}
+                <span className="font-mono text-neutral-200">
+                  {effectiveIntensity}
+                  {intensityOverride !== null ? ` (DEV:${intensityOverride})` : ""}
+                </span>{" "}
+                / max {timing.totalMaxMs}ms / gap {timing.gapMinMs}..{timing.gapMaxMs}ms
+              </div>
+              <div>
                 audio: <span className={audioEnabled ? "text-emerald-200" : "text-amber-200"}>{audioEnabled ? "enabled" : "disabled"}</span>
               </div>
             </div>
+
+            {view && (
+              <div className="mt-6 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">
+                <div className="text-xs text-neutral-400">演出プレビュー</div>
+                <div className="mt-2 grid gap-1 text-sm text-neutral-300">
+                  <div>
+                    白熱度（reachPlayers）: <span className="font-mono text-neutral-100">{view.stats.reachPlayers}</span> → intensity{" "}
+                    <span className="font-mono text-neutral-100">{effectiveIntensity}</span>
+                    {intensityOverride !== null ? <span className="text-amber-200">（DEV override）</span> : null}
+                  </div>
+                  {view.pendingDraw && (
+                    <div className="text-xs text-neutral-400">
+                      次番号プレビュー（Adminのみ）: impact reachPlayers={view.pendingDraw.impact.reachPlayers}, bingoPlayers={view.pendingDraw.impact.bingoPlayers}{" "}
+                      {willNewBingo ? <span className="text-amber-200">JACKPOT確定</span> : null}
+                    </div>
+                  )}
+                </div>
+
+                {devMode && (
+                  <div className="mt-4 border-t border-neutral-800 pt-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-neutral-400">DevTools</div>
+                      <a className="text-xs text-neutral-300 underline hover:text-neutral-100" href={`/s/${encodeURIComponent(code)}/dev`} target="_blank" rel="noreferrer">
+                        Devデッキを開く
+                      </a>
+                    </div>
+
+                    <div className="mt-3 grid gap-3">
+                      <div>
+                        <div className="text-xs text-neutral-500">白熱度 override（演出テンポ/テーマの強制）</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button disabled={devBusy} onClick={() => void devTune(null)} size="sm" variant={intensityOverride === null ? "primary" : "secondary"}>
+                            AUTO
+                          </Button>
+                          {[0, 1, 2, 3].map((v) => (
+                            <Button
+                              key={v}
+                              disabled={devBusy}
+                              onClick={() => void devTune(v as ReachIntensity)}
+                              size="sm"
+                              variant={intensityOverride === v ? "primary" : "secondary"}
+                            >
+                              {v}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <div>
+                          <div className="text-xs text-neutral-500">ダミー参加者投入（最大200）</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Input className="w-28" value={devSeedCount} onChange={(e) => setDevSeedCount(e.target.value)} placeholder="count" />
+                            <Input className="w-32" value={devSeedPrefix} onChange={(e) => setDevSeedPrefix(e.target.value)} placeholder="prefix" />
+                          </div>
+                        </div>
+                        <Button disabled={devBusy || !canOperate} onClick={() => void devSeed()} size="sm" variant="primary">
+                          追加
+                        </Button>
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <div>
+                          <div className="text-xs text-neutral-500">次番号を強制 prepare（Adminのみ）</div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <Input className="w-28" value={devForceNumber} onChange={(e) => setDevForceNumber(e.target.value)} placeholder="1..75" />
+                            <div className="text-xs text-neutral-500 self-center">（GOは通常通りW/A/S/D）</div>
+                          </div>
+                        </div>
+                        <Button disabled={devBusy || !canOperate} onClick={() => void devPrepareNumber()} size="sm" variant="primary">
+                          強制prepare
+                        </Button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button disabled={devBusy} onClick={() => void devReset()} size="sm" variant="destructive">
+                          リセット（参加者/抽選履歴）
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {lastCommit && (
               <div className="mt-6 rounded-lg border border-neutral-800 bg-neutral-950/40 p-4">

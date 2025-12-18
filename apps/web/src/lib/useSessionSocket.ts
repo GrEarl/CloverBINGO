@@ -18,6 +18,12 @@ export type SessionStats = {
   minMissingHistogram: { "0": number; "1": number; "2": number; "3plus": number };
 };
 
+export type FxSnapshot = {
+  actualReachIntensity: 0 | 1 | 2 | 3;
+  effectiveReachIntensity: 0 | 1 | 2 | 3;
+  intensityOverride: (0 | 1 | 2 | 3) | null;
+};
+
 export type PlayerStatus = "active" | "disabled";
 
 export type Player = {
@@ -56,6 +62,7 @@ export type ParticipantSnapshot = {
   lastNumbers: number[];
   drawnNumbers: number[];
   stats: SessionStats;
+  fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   player: (Player & { card: number[][] }) | null;
 };
@@ -74,6 +81,7 @@ export type DisplaySnapshot = {
   lastNumbers: number[];
   drawnNumbers: number[];
   stats: SessionStats;
+  fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   screen: DisplayScreen;
   reel: {
@@ -95,6 +103,7 @@ export type ModSnapshot = {
   lastNumber: number | null;
   lastNumbers: number[];
   stats: SessionStats;
+  fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   drawnNumbers?: number[];
   players: Array<Player & { card: number[][] }>;
@@ -113,6 +122,7 @@ export type AdminSnapshot = {
   lastNumber: number | null;
   lastNumbers: number[];
   stats: SessionStats;
+  fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   drawnNumbers?: number[];
   players: Array<Player & { card: number[][] }>;
