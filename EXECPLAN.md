@@ -71,6 +71,7 @@
 - [x] (2025-12-18 19:57Z) 開発/演出確認の効率化: 1モニターで検証し切れるように `/s/:code/dev`（Devデッキ: display ten/one + admin を同一画面に集約）と、セッション無しで演出を触れる `/showcase`（演出ショーケース）を追加した。
 - [x] (2025-12-18 20:42Z) 実機フィードバック対応: DevTools の `dev.seed` が本番で 500 になる問題を修正（D1/Drizzle の multi-row insert が環境により失敗し得るため、dev用途は 1行ずつ insert に変更）。あわせて Devデッキに「入室（招待token）」導線と iframe 再読込を追加し、Display は内側（統計）の重複表示を撤去して “数字/スポットライト” に寄せつつ、縦方向に見切れないようレイアウトを詰めた。
 - [x] (2025-12-18 21:18Z) Display の追加調整: 数字の横幅を増やし、スポットライト未使用時は統計を表彰台風に表示し、`PerfectDOSVGA437` フォントを導入した（Web: `tsc`/`vite build` 通過まで確認）。
+- [x] (2025-12-18 21:57Z) Display の JACKPOT 演出を改善: 新規BINGO名は「1人→徐々に追加して縦に伸ばす」表示に変更し、画面に収まらない場合はページ分割して全員を表示する（表示時間も人数に応じて長めに取る）。
 
 ## Surprises & Discoveries
 
@@ -175,6 +176,9 @@
   Date/Author: 2025-12-18 / codex
 - Decision: 会場表示の数字フォント（`font-header`）は `PerfectDOSVGA437` を優先し、横方向の詰まりは `scale-x` とリール枠の左右余白で調整する。
   Rationale: PS1/ピクセル寄せの質感を上げつつ、遠距離での数字判読（輪郭の明瞭さ）を維持するため。
+  Date/Author: 2025-12-18 / codex
+- Decision: 新規BINGO（JACKPOT）演出は「省略せず全員の名前を表示」を優先し、表示が画面外にはみ出す場合はページ分割で回避する。通常モードは名前を1人ずつ追加して“溜め”を作り、safeMode では即時表示（ページは自動めくり）に落とす。
+  Rationale: 会場の盛り上がり（誰がビンゴしたか）を明確に伝えつつ、遠距離視認性とレイアウト破綻を両立するため。
   Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective

@@ -30,6 +30,15 @@ type DrawCommittedEvent = {
 
 type SpotlightPlayer = DisplaySnapshot["spotlight"]["players"][number];
 
+type BingoAnnounceState = {
+  key: number;
+  names: string[];
+  showNames: boolean;
+  pageIndex: number;
+  shownCount: number;
+  pageSize: number;
+};
+
 function safeScreen(input: string | undefined): DisplayScreen | null {
   if (input === "ten" || input === "one") return input;
   return null;
@@ -55,6 +64,32 @@ function randomIntInclusive(min: number, max: number): number {
   const hi = Math.floor(Math.max(min, max));
   if (hi <= lo) return lo;
   return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function computeJackpotStepMs(winnerCount: number): number {
+  // Keep the reveal readable for small counts, but avoid absurd durations for large counts.
+  const count = Math.max(1, Math.floor(winnerCount));
+  const raw = Math.floor(12000 / count);
+  return clampInt(raw, 120, 650);
+}
+
+function computeJackpotPageSize(): number {
+  if (typeof window === "undefined") return 8;
+  const w = Math.max(320, window.innerWidth);
+  const h = Math.max(320, window.innerHeight);
+  // Header uses text-[min(26vw,26vh)] and we keep extra padding for borders and spacing.
+  const headerPx = Math.min(w * 0.26, h * 0.26);
+  const chromePx = 260; // conservative: border/padding/title spacing
+  const available = Math.max(180, h - headerPx - chromePx);
+  // Winner rows use text-[min(6vw,3.6rem)] => max ~58px on typical screens.
+  const fontPx = Math.min(w * 0.06, 58);
+  const rowPx = fontPx * 1.08 + 10; // leading + gap
+  const rows = Math.floor(available / rowPx);
+  return clampInt(rows, 3, 12);
 }
 
 function reachIntensityFromCount(reachCount: number | null | undefined): ReachIntensity {
@@ -140,9 +175,10 @@ export default function DisplayPage() {
 
   const [bingoFx, setBingoFx] = useState<{ key: number; count: number } | null>(null);
   const bingoFxTimerRef = useRef<number | null>(null);
-  const [bingoAnnounce, setBingoAnnounce] = useState<{ key: number; names: string[]; showNames: boolean } | null>(null);
+  const [bingoAnnounce, setBingoAnnounce] = useState<BingoAnnounceState | null>(null);
   const bingoAnnounceSeqRef = useRef(0);
   const bingoAnnounceNameTimerRef = useRef<number | null>(null);
+  const bingoAnnounceStepTimerRef = useRef<number | null>(null);
   const bingoAnnounceHideTimerRef = useRef<number | null>(null);
   const prevBingoPlayersRef = useRef<number | null>(null);
   const lastCommittedSeqRef = useRef<number | null>(null);
@@ -302,16 +338,21 @@ export default function DisplayPage() {
       bingoAnnounceSeqRef.current += 1;
       const announceSeq = bingoAnnounceSeqRef.current;
       if (bingoAnnounceNameTimerRef.current) window.clearTimeout(bingoAnnounceNameTimerRef.current);
+      if (bingoAnnounceStepTimerRef.current) window.clearTimeout(bingoAnnounceStepTimerRef.current);
       if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
       bingoAnnounceNameTimerRef.current = null;
+      bingoAnnounceStepTimerRef.current = null;
       bingoAnnounceHideTimerRef.current = null;
       const newBingoNames = Array.isArray(lastEvent.newBingoNames)
         ? lastEvent.newBingoNames.filter((n): n is string => typeof n === "string" && n.trim().length > 0)
         : [];
       if (newBingoNames.length > 0) {
         const key = Date.now();
-        setBingoAnnounce({ key, names: newBingoNames, showNames: safeMode });
-        
+        const pageSize = computeJackpotPageSize();
+        const pageTotal = Math.max(1, Math.ceil(newBingoNames.length / pageSize));
+
+        const pageCount = (pageIndex: number) => Math.max(0, Math.min(pageSize, newBingoNames.length - pageIndex * pageSize));
+
         // VJ-Level FX (disabled in safe/reduced-motion mode)
         triggerShake("violent");
         if (fxActive && !safeMode) {
@@ -320,20 +361,122 @@ export default function DisplayPage() {
           setStrobe(true);
           setTimeout(() => setStrobe(false), 2000);
         }
-        
-        const revealDelayMs = safeMode ? 0 : randomIntInclusive(250, 650);
-        if (!safeMode) {
+
+        const pageHoldMs = safeMode ? 1800 : 900;
+        const endHoldMs = safeMode ? 1100 : 3200;
+
+        if (safeMode) {
+          // No staged reveal in safe mode: show per-page instantly, then flip pages.
+          setBingoAnnounce({
+            key,
+            names: newBingoNames,
+            showNames: true,
+            pageIndex: 0,
+            shownCount: pageCount(0),
+            pageSize,
+          });
+
+          if (pageTotal > 1) {
+            let nextPage = 1;
+            const flip = () => {
+              if (bingoAnnounceSeqRef.current !== announceSeq) return;
+              if (nextPage >= pageTotal) return;
+              setBingoAnnounce({
+                key,
+                names: newBingoNames,
+                showNames: true,
+                pageIndex: nextPage,
+                shownCount: pageCount(nextPage),
+                pageSize,
+              });
+              nextPage += 1;
+              bingoAnnounceStepTimerRef.current = window.setTimeout(flip, pageHoldMs);
+            };
+            bingoAnnounceStepTimerRef.current = window.setTimeout(flip, pageHoldMs);
+          }
+
+          const minDurationMs = 2200;
+          const hideAfterMs = Math.max(minDurationMs, pageTotal * pageHoldMs + endHoldMs);
+          bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
+            if (bingoAnnounceSeqRef.current !== announceSeq) return;
+            setBingoAnnounce(null);
+          }, hideAfterMs);
+        } else {
+          // Normal mode: reveal winners one-by-one, growing the list downward.
+          const revealDelayMs = randomIntInclusive(250, 650);
+          const stepMs = computeJackpotStepMs(newBingoNames.length);
+
+          let pageIndex = 0;
+          let shownCount = 0;
+
+          const scheduleHide = () => {
+            bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
+              if (bingoAnnounceSeqRef.current !== announceSeq) return;
+              setBingoAnnounce(null);
+            }, endHoldMs);
+          };
+
+          const step = () => {
+            if (bingoAnnounceSeqRef.current !== announceSeq) return;
+            const currentPageCount = pageCount(pageIndex);
+            if (currentPageCount <= 0) {
+              setBingoAnnounce(null);
+              return;
+            }
+
+            if (shownCount < currentPageCount) {
+              shownCount += 1;
+              setBingoAnnounce({
+                key,
+                names: newBingoNames,
+                showNames: true,
+                pageIndex,
+                shownCount,
+                pageSize,
+              });
+              if (shownCount < currentPageCount) {
+                bingoAnnounceStepTimerRef.current = window.setTimeout(step, stepMs);
+              } else if (pageIndex + 1 < pageTotal) {
+                bingoAnnounceStepTimerRef.current = window.setTimeout(() => {
+                  if (bingoAnnounceSeqRef.current !== announceSeq) return;
+                  pageIndex += 1;
+                  shownCount = 0;
+                  step();
+                }, pageHoldMs);
+              } else {
+                scheduleHide();
+              }
+              return;
+            }
+
+            if (pageIndex + 1 < pageTotal) {
+              bingoAnnounceStepTimerRef.current = window.setTimeout(() => {
+                if (bingoAnnounceSeqRef.current !== announceSeq) return;
+                pageIndex += 1;
+                shownCount = 0;
+                step();
+              }, pageHoldMs);
+              return;
+            }
+
+            scheduleHide();
+          };
+
+          // Create the announce container immediately (so JACKPOT text appears), but reveal names after delay.
+          setBingoAnnounce({
+            key,
+            names: newBingoNames,
+            showNames: false,
+            pageIndex: 0,
+            shownCount: 0,
+            pageSize,
+          });
+
           bingoAnnounceNameTimerRef.current = window.setTimeout(() => {
             if (bingoAnnounceSeqRef.current !== announceSeq) return;
-            setBingoAnnounce({ key, names: newBingoNames, showNames: true });
+            step();
           }, revealDelayMs);
         }
-
-        const hideAfterMs = safeMode ? 2200 : 3800;
-        bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
-          if (bingoAnnounceSeqRef.current !== announceSeq) return;
-          setBingoAnnounce(null);
-        }, hideAfterMs);
       } else {
         setBingoAnnounce(null);
       }
@@ -402,6 +545,7 @@ export default function DisplayPage() {
       if (readableBoostTimerRef.current) window.clearTimeout(readableBoostTimerRef.current);
       if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
       if (bingoAnnounceNameTimerRef.current) window.clearTimeout(bingoAnnounceNameTimerRef.current);
+      if (bingoAnnounceStepTimerRef.current) window.clearTimeout(bingoAnnounceStepTimerRef.current);
       if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
       if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current);
     };
@@ -610,6 +754,17 @@ export default function DisplayPage() {
   const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
   const glitchClass = glitch ? "glitch-active" : "";
   const strobeClass = strobe ? "strobe-active" : "";
+  const jackpot = useMemo(() => {
+    if (!bingoAnnounce) return null;
+    const pageSize = Math.max(1, bingoAnnounce.pageSize);
+    const totalPages = Math.max(1, Math.ceil(bingoAnnounce.names.length / pageSize));
+    const pageIndex = clampInt(bingoAnnounce.pageIndex, 0, totalPages - 1);
+    const start = pageIndex * pageSize;
+    const pageNames = bingoAnnounce.names.slice(start, start + pageSize);
+    const shownCount = clampInt(bingoAnnounce.shownCount, 0, pageNames.length);
+    const shown = bingoAnnounce.showNames ? pageNames.slice(0, shownCount) : [];
+    return { totalPages, pageIndex, shown, totalWinners: bingoAnnounce.names.length };
+  }, [bingoAnnounce]);
 
   return (
     <div className="crt-stage bg-black">
@@ -660,42 +815,45 @@ export default function DisplayPage() {
                 "border-pit-primary bg-black/80 text-pit-primary",
                 safeMode ? "shadow-[0_0_40px_rgba(234,179,8,0.12)]" : "shadow-[0_0_100px_rgba(234,179,8,0.4)] box-glow",
               )}
-            >
-              <div className="text-[min(26vw,26vh)] font-black leading-none tracking-tighter text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.6)] animate-pulse">
-                JACKPOT!
-              </div>
-              {bingoAnnounce && bingoAnnounce.showNames && (
-                <>
-                  <div className="mt-4 max-w-[84vw] truncate text-4xl font-bold text-white md:text-6xl text-glow">
-                    {bingoAnnounce.names[0] ?? "?"}
-                  </div>
-                  {bingoAnnounce.names.length > 1 && (
-                    <div className="mt-4">
-                      <div className="text-sm font-semibold tracking-[0.5em] text-pit-text-dim">WINNERS_LIST</div>
-                      <div className="mt-2 flex max-w-[84vw] flex-wrap justify-center gap-x-6 gap-y-2 text-xl text-pit-text-main md:text-2xl">
-                        {bingoAnnounce.names.slice(1, 5).map((name, idx) => (
-                          <span key={idx} className="max-w-[18ch] truncate text-glow">
-                            {name}
-                          </span>
-                        ))}
-                        {(() => {
-                          const shownOthers = Math.min(4, Math.max(0, bingoAnnounce.names.length - 1));
-                          const remaining = Math.max(0, bingoAnnounce.names.length - 1 - shownOthers);
-                          return remaining > 0 ? <span className="text-pit-text-dim">+ {remaining} OTHERS</span> : null;
-                        })()}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-              {(() => {
-                const count = bingoFx?.count ?? (bingoAnnounce ? bingoAnnounce.names.length : 0);
-                return count > 1 ? <div className="mt-2 text-xl text-pit-primary font-bold">+{count}</div> : null;
-              })()}
-            </div>
-          </div>
-        </>
-      )}
+	            >
+	              <div
+	                className={cn(
+	                  "text-[min(26vw,26vh)] font-black leading-none tracking-tighter text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.6)]",
+	                  !safeMode && "animate-pulse",
+	                )}
+	              >
+	                JACKPOT!
+	              </div>
+	              {jackpot && (
+	                <div className="mt-6 w-full max-w-[min(88vw,1100px)]">
+	                  <div className="flex items-center justify-between gap-4 border-t border-pit-border/60 pt-4 text-xs font-semibold tracking-[0.42em] text-pit-text-dim">
+	                    <div>WINNERS</div>
+	                    <div className="font-mono tracking-[0.22em]">
+	                      TOTAL {jackpot.totalWinners}
+	                      {jackpot.totalPages > 1 ? ` :: PAGE ${jackpot.pageIndex + 1}/${jackpot.totalPages}` : ""}
+	                    </div>
+	                  </div>
+	
+	                  {jackpot.shown.length > 0 ? (
+	                    <div className="mt-4 flex flex-col items-center gap-2">
+	                      {jackpot.shown.map((name, idx) => (
+	                        <div
+	                          key={`${jackpot.pageIndex}:${idx}:${name}`}
+	                          className="w-full max-w-[84vw] truncate text-center text-[min(6vw,3.6rem)] font-black leading-[1.05] text-white text-glow"
+	                        >
+	                          {name}
+	                        </div>
+	                      ))}
+	                    </div>
+	                  ) : (
+	                    <div className="mt-4 text-xs font-semibold tracking-[0.5em] text-pit-text-dim">LOCKING IN...</div>
+	                  )}
+	                </div>
+	              )}
+	            </div>
+	          </div>
+	        </>
+	      )}
 
       <div
         className={cn(
