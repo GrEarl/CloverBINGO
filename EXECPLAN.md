@@ -72,6 +72,7 @@
 - [x] (2025-12-18 20:42Z) 実機フィードバック対応: DevTools の `dev.seed` が本番で 500 になる問題を修正（D1/Drizzle の multi-row insert が環境により失敗し得るため、dev用途は 1行ずつ insert に変更）。あわせて Devデッキに「入室（招待token）」導線と iframe 再読込を追加し、Display は内側（統計）の重複表示を撤去して “数字/スポットライト” に寄せつつ、縦方向に見切れないようレイアウトを詰めた。
 - [x] (2025-12-18 21:18Z) Display の追加調整: 数字の横幅を増やし、スポットライト未使用時は統計を表彰台風に表示し、`PerfectDOSVGA437` フォントを導入した（Web: `tsc`/`vite build` 通過まで確認）。
 - [x] (2025-12-18 21:57Z) Display の JACKPOT 演出を改善: 新規BINGO名は「1人→徐々に追加して縦に伸ばす」表示に変更し、画面に収まらない場合はページ分割して全員を表示する（表示時間も人数に応じて長めに取る）。
+- [ ] (2025-12-18 22:01Z) Display の微調整: LongStreakEnd のSEが鳴り終わるまでは JACKPOT を消さない。数字は「枠の中央に配置」し、サイズを少し上げつつ余白を詰める。
 
 ## Surprises & Discoveries
 
@@ -179,6 +180,9 @@
   Date/Author: 2025-12-18 / codex
 - Decision: 新規BINGO（JACKPOT）演出は「省略せず全員の名前を表示」を優先し、表示が画面外にはみ出す場合はページ分割で回避する。通常モードは名前を1人ずつ追加して“溜め”を作り、safeMode では即時表示（ページは自動めくり）に落とす。
   Rationale: 会場の盛り上がり（誰がビンゴしたか）を明確に伝えつつ、遠距離視認性とレイアウト破綻を両立するため。
+  Date/Author: 2025-12-18 / codex
+- Decision: LongStreakEnd（`SoundSlotMachineLongStreakEndAnticipation.ogg`）が鳴るケース（新規BINGOが2人以上）では、DisplayのJACKPOT表示は「Admin側でSEが鳴り終わる」まで消さない。表示の最短保持時間は「Adminの名前送りテンポ（1400ms/人） + SE長（約4.11s）」から導出する。
+  Rationale: 会場演出の音（最終の溜め）と表示が噛み合わないと“締まり”が悪く、見ている側に違和感が出るため。Display単体ではAdminの音再生状態を直接参照できないので、同梱OGGの実測長に基づく下限時間で揃える。
   Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective

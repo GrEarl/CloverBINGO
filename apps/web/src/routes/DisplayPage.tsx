@@ -74,7 +74,7 @@ function computeJackpotStepMs(winnerCount: number): number {
   // Keep the reveal readable for small counts, but avoid absurd durations for large counts.
   const count = Math.max(1, Math.floor(winnerCount));
   const raw = Math.floor(12000 / count);
-  return clampInt(raw, 120, 650);
+  return clampInt(raw, 180, 1400);
 }
 
 function computeJackpotPageSize(): number {
@@ -90,6 +90,17 @@ function computeJackpotPageSize(): number {
   const rowPx = fontPx * 1.08 + 10; // leading + gap
   const rows = Math.floor(available / rowPx);
   return clampInt(rows, 3, 12);
+}
+
+const ADMIN_BINGO_NAME_STEP_MS = 1400;
+// Measured via ffprobe: 4.111s (add a small buffer so we never cut early).
+const LONG_STREAK_END_SFX_MS = 4300;
+
+function computeJackpotMinVisibleMs(winnerCount: number): number {
+  const count = Math.max(0, Math.floor(winnerCount));
+  if (count < 2) return 0;
+  // Admin plays longStreakEnd after "1400ms/name" cycling ends.
+  return count * ADMIN_BINGO_NAME_STEP_MS + LONG_STREAK_END_SFX_MS;
 }
 
 function reachIntensityFromCount(reachCount: number | null | undefined): ReachIntensity {
@@ -348,8 +359,10 @@ export default function DisplayPage() {
         : [];
       if (newBingoNames.length > 0) {
         const key = Date.now();
+        const startedAt = key;
         const pageSize = computeJackpotPageSize();
         const pageTotal = Math.max(1, Math.ceil(newBingoNames.length / pageSize));
+        const minVisibleMs = computeJackpotMinVisibleMs(newBingoNames.length);
 
         const pageCount = (pageIndex: number) => Math.max(0, Math.min(pageSize, newBingoNames.length - pageIndex * pageSize));
 
@@ -396,7 +409,7 @@ export default function DisplayPage() {
           }
 
           const minDurationMs = 2200;
-          const hideAfterMs = Math.max(minDurationMs, pageTotal * pageHoldMs + endHoldMs);
+          const hideAfterMs = Math.max(minDurationMs, pageTotal * pageHoldMs + endHoldMs, minVisibleMs);
           bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
             if (bingoAnnounceSeqRef.current !== announceSeq) return;
             setBingoAnnounce(null);
@@ -410,10 +423,14 @@ export default function DisplayPage() {
           let shownCount = 0;
 
           const scheduleHide = () => {
+            if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
+            const elapsedMs = Date.now() - startedAt;
+            const remainingForSfxMs = minVisibleMs > 0 ? Math.max(0, minVisibleMs - elapsedMs) : 0;
+            const delayMs = Math.max(endHoldMs, remainingForSfxMs);
             bingoAnnounceHideTimerRef.current = window.setTimeout(() => {
               if (bingoAnnounceSeqRef.current !== announceSeq) return;
               setBingoAnnounce(null);
-            }, endHoldMs);
+            }, delayMs);
           };
 
           const step = () => {
@@ -915,7 +932,7 @@ export default function DisplayPage() {
 	            <div className={cn("relative inline-flex items-center justify-center", fxActive && popDigit && !safeMode && "animate-[clover-clunk_420ms_ease-out]")}>
 				                <div
 				                  className={cn(
-				                    "relative isolate overflow-hidden border max-w-full w-[min(96vw,100vh)] py-[clamp(10px,1.2vw,26px)] px-[clamp(16px,3.2vw,80px)]",
+				                    "relative isolate overflow-hidden border max-w-full w-[min(96vw,100vh)] py-[clamp(8px,0.9vw,18px)] px-[clamp(12px,2.6vw,56px)]",
 				                    "border-pit-border bg-black shadow-[0_0_100px_rgba(0,0,0,1)]",
 				                    fxActive && !safeMode && !drawSpinning && "animate-[clover-breath_4.8s_ease-in-out_infinite]",
 				                    drawSpinning && tensionTheme === "calm" && "border-pit-text-dim/50 shadow-[0_0_120px_rgba(255,255,255,0.12)]",
@@ -943,15 +960,15 @@ export default function DisplayPage() {
                   <div className="pointer-events-none absolute inset-0 animate-[clover-confirm_180ms_ease-out] border-4 border-emerald-500" />
                 )}
 
-			                <div
-			                  className={cn(
-			                    "relative z-10 font-black tabular-nums tracking-tight font-header scale-x-110",
-			                    "text-[min(50vw,72vh)] leading-none",
-			                    drawSpinning && tensionTheme === "calm" && "text-pit-text-main drop-shadow-[0_0_18px_rgba(255,255,255,0.45)]",
-			                    drawSpinning && tensionTheme === "yellow" && "text-pit-primary drop-shadow-[0_0_22px_rgba(234,179,8,0.85)]",
-			                    drawSpinning && tensionTheme === "red" && "text-pit-danger drop-shadow-[0_0_28px_rgba(239,68,68,0.85)]",
-		                    drawSpinning && tensionTheme === "rainbow" && "rainbow-text rainbow-pan drop-shadow-[0_0_24px_rgba(255,255,255,0.25)]",
-		                    !drawSpinning && "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
+				                <div
+				                  className={cn(
+				                    "relative z-10 font-black tabular-nums tracking-tight font-header scale-x-110 text-center",
+				                    "text-[min(56vw,78vh)] leading-none",
+				                    drawSpinning && tensionTheme === "calm" && "text-pit-text-main drop-shadow-[0_0_18px_rgba(255,255,255,0.45)]",
+				                    drawSpinning && tensionTheme === "yellow" && "text-pit-primary drop-shadow-[0_0_22px_rgba(234,179,8,0.85)]",
+				                    drawSpinning && tensionTheme === "red" && "text-pit-danger drop-shadow-[0_0_28px_rgba(239,68,68,0.85)]",
+			                    drawSpinning && tensionTheme === "rainbow" && "rainbow-text rainbow-pan drop-shadow-[0_0_24px_rgba(255,255,255,0.25)]",
+			                    !drawSpinning && "text-pit-text-main drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]",
 		                    fxActive && isSpinning && !safeMode && (isLastSpinning ? "blur-[0.5px]" : "blur-[2px]"),
 		                  )}
 		                >
