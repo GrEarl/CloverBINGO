@@ -47,7 +47,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Outcomes & Retrospective
 
-- (2025-12-19) （未記入）
+- (2025-12-19) 参加者の初回BINGO承認フロー（Mod承認→参加者了承）とAdmin切替、未承認のみの一括承認、リーチ枠の虹色枠表示を実装した。型チェック/ビルドは完了。残課題は承認フローの自動テスト追加と、運用時の端末再登録時のUX確認。
 
 ## Context and Orientation
 
@@ -127,3 +127,4 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 - 2025-12-19: 初版作成（承認フローとリーチ枠調整の計画を記述）。
 - 2025-12-19: Adminの承認必須切替と「未承認のみ一括承認」の要件を反映し、進捗と決定ログを更新。
 - 2025-12-19: 型チェック/ビルド結果を追記し、進捗と成果物欄を更新。
+- 2025-12-19: 実装完了として成果/残課題を記録。
