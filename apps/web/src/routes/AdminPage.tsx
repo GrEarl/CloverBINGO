@@ -266,6 +266,7 @@ export default function AdminPage() {
   const canOperate = Boolean(view && view.sessionStatus === "active");
   const canPrepare = Boolean(canOperate && view?.drawState !== "spinning");
   const canGo = Boolean(canOperate && view?.pendingDraw && tenReel === "idle" && oneReel === "idle");
+  const bingoApprovalRequired = view?.bingoApprovalRequired ?? true;
 
   const reachPlayers = view?.stats?.reachPlayers ?? null;
   const actualIntensity: ReachIntensity = (view?.fx?.actualReachIntensity ?? reachIntensityFromCount(reachPlayers)) as ReachIntensity;
@@ -278,6 +279,7 @@ export default function AdminPage() {
   const [devSeedCount, setDevSeedCount] = useState("80");
   const [devSeedPrefix, setDevSeedPrefix] = useState("DEV");
   const [devForceNumber, setDevForceNumber] = useState("");
+  const [bingoApprovalBusy, setBingoApprovalBusy] = useState(false);
 
   async function prepare() {
     setError(null);
@@ -332,6 +334,18 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
       setDevBusy(false);
+    }
+  }
+
+  async function setBingoApprovalRequired(next: boolean) {
+    setError(null);
+    setBingoApprovalBusy(true);
+    try {
+      await postJson(`/api/admin/bingo/setting?code=${encodeURIComponent(code)}`, { required: next });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setBingoApprovalBusy(false);
     }
   }
 
@@ -838,6 +852,24 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+
+            <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/40 p-3">
+              <div className="text-xs text-neutral-400">初回BINGO承認</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant={bingoApprovalRequired ? "warning" : "neutral"}>
+                  {bingoApprovalRequired ? "承認あり" : "承認なし"}
+                </Badge>
+                <Button
+                  disabled={bingoApprovalBusy || !canOperate}
+                  onClick={() => void setBingoApprovalRequired(!bingoApprovalRequired)}
+                  size="sm"
+                  variant="secondary"
+                >
+                  {bingoApprovalBusy ? "更新中..." : bingoApprovalRequired ? "承認を不要にする" : "承認を有効化する"}
+                </Button>
+              </div>
+              <div className="mt-2 text-xs text-neutral-500">※ Modの一括承認は「未承認のBINGOのみ」が対象です。</div>
+            </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
               <Button

@@ -75,6 +75,8 @@ export default function ParticipantPage() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinNotice, setJoinNotice] = useState<string | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
+  const [acking, setAcking] = useState(false);
 
   const { snapshot, status } = useSessionSocket({ role: "participant", code, playerId: playerId || undefined });
   const view = useMemo(() => {
@@ -108,13 +110,42 @@ export default function ParticipantPage() {
     if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
   }, []);
 
+  async function ackBingo() {
+    if (!playerId) return;
+    setAcking(true);
+    setAckError(null);
+    try {
+      const res = await fetch(`/api/participant/bingo/ack?code=${encodeURIComponent(code)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ participantId: playerId, deviceId }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `ack failed (${res.status})`);
+      }
+    } catch (err) {
+      setAckError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setAcking(false);
+    }
+  }
+
   const reachHighlights = useMemo(() => {
     if (!view?.player?.card) return null;
     return buildReachHighlights(view.player.card, view.drawnNumbers);
   }, [view?.player?.card, view?.drawnNumbers]);
 
+  const bingoApproval = view?.bingoApproval ?? null;
+  const isBingo = Boolean(view?.player?.progress?.isBingo);
+  const approvalRequired = view?.bingoApprovalRequired ?? true;
+  const needsAck = Boolean(approvalRequired && isBingo && (!bingoApproval || !bingoApproval.acknowledgedAt));
+  const canAck = Boolean(needsAck && bingoApproval?.approvedAt);
+  const showBingoOverlay = Boolean(needsAck || bingoFx);
+
   const bingoParticles = useMemo(() => {
-    if (!bingoFx) return [];
+    if (!showBingoOverlay) return [];
+    const keyBase = bingoFx?.key ?? bingoApproval?.firstBingoAt ?? Date.now();
     const count = 26;
     const list: Array<{ key: string; style: CSSProperties }> = [];
     for (let i = 0; i < count; i += 1) {
@@ -125,7 +156,7 @@ export default function ParticipantPage() {
       const rot = Math.floor(Math.random() * 360);
       const dur = 1400 + Math.floor(Math.random() * 700);
       list.push({
-        key: `${bingoFx.key}:${i}`,
+        key: `${keyBase}:${i}`,
         style: {
           "--x": `${x}%`,
           "--size": `${size}px`,
@@ -137,7 +168,7 @@ export default function ParticipantPage() {
       });
     }
     return list;
-  }, [bingoFx]);
+  }, [bingoFx, showBingoOverlay, bingoApproval?.firstBingoAt]);
 
   async function join() {
     setJoining(true);
@@ -292,17 +323,32 @@ export default function ParticipantPage() {
         )}
       </div>
 
-      {bingoFx && (
+      {showBingoOverlay && (
         <>
           <div className="pointer-events-none fixed inset-0 z-40">
             {bingoParticles.map((p) => (
               <span key={p.key} className="clover-particle" style={p.style} />
             ))}
           </div>
-          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center px-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-6">
             <div className="rounded-xl border border-amber-300/70 bg-black/80 px-6 py-4 text-center shadow-[0_0_30px_rgba(234,179,8,0.4)]">
               <div className="text-[min(18vw,4rem)] font-black tracking-tight text-amber-300 drop-shadow-[0_0_20px_rgba(234,179,8,0.7)]">BINGO!</div>
               <div className="mt-2 text-xs text-neutral-300">おめでとう！</div>
+              {needsAck && (
+                <div className="mt-3 flex flex-col items-center gap-2">
+                  <Button
+                    disabled={!canAck || acking}
+                    onClick={() => void ackBingo()}
+                    size="sm"
+                    variant={canAck ? "primary" : "secondary"}
+                    className="pointer-events-auto"
+                  >
+                    {acking ? "送信中..." : canAck ? "了承する" : "承認待ち"}
+                  </Button>
+                  {ackError && <div className="text-[0.65rem] text-rose-300">{ackError}</div>}
+                  {!canAck && <div className="text-[0.65rem] text-neutral-400">Modの承認後に押せます</div>}
+                </div>
+              )}
             </div>
           </div>
         </>

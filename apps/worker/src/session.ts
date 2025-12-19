@@ -49,6 +49,14 @@ type PendingPreview = {
   newBingoNames: string[];
 };
 
+type BingoApprovalState = {
+  participantId: string;
+  firstBingoAt: number;
+  approvedAt: number | null;
+  acknowledgedAt: number | null;
+  approvedBy: string | null;
+};
+
 type AudioStatus = {
   bgm: {
     label: string | null;
@@ -97,6 +105,7 @@ type LastCommitSummary = {
 type PlayerState = {
   id: string;
   status: ParticipantStatus;
+  deviceId: string | null;
   displayName: string;
   joinedAt: number;
   disabledAt: number | null;
@@ -286,6 +295,11 @@ function sanitizeSpotlightIds(raw: unknown): string[] {
   return raw.filter((v) => typeof v === "string").slice(0, 6);
 }
 
+function sanitizeParticipantIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v) => typeof v === "string" && v.trim().length > 0).map((v) => v.trim()).slice(0, 200);
+}
+
 function defaultSpotlightState(t: number): SpotlightState {
   return { version: 0, ids: [], updatedAt: t, updatedBy: "system" };
 }
@@ -392,11 +406,35 @@ export class SessionDurableObject {
   private lastCommit: LastCommitSummary | null = null;
   private devFxIntensityOverride: ReachIntensity | null = null;
   private spotlight: SpotlightState = defaultSpotlightState(nowMs());
+  private bingoApprovals: Record<string, BingoApprovalState> = {};
+  private bingoApprovalRequired = true;
 
   constructor(private readonly state: DurableObjectState, private readonly env: Bindings) {}
 
   private touch(): void {
     this.updatedAt = nowMs();
+  }
+
+  private persistBingoApprovals(): void {
+    this.state.waitUntil(this.state.storage.put("bingoApprovals", this.bingoApprovals));
+  }
+
+  private ensureBingoApprovalState(participantId: string, at: number): BingoApprovalState {
+    const existing = this.bingoApprovals[participantId];
+    if (existing) return existing;
+    const created: BingoApprovalState = {
+      participantId,
+      firstBingoAt: at,
+      approvedAt: null,
+      acknowledgedAt: null,
+      approvedBy: null,
+    };
+    this.bingoApprovals[participantId] = created;
+    return created;
+  }
+
+  private listBingoApprovals(): BingoApprovalState[] {
+    return Object.values(this.bingoApprovals).sort((a, b) => a.firstBingoAt - b.firstBingoAt);
   }
 
   private pushEvent(entry: Omit<ObserverEvent, "id" | "at"> & { at?: number }): void {
@@ -486,6 +524,7 @@ export class SessionDurableObject {
           this.players[row.id] = {
             id: row.id,
             status,
+            deviceId: row.deviceId ?? null,
             displayName: row.displayName,
             joinedAt: Date.parse(row.createdAt) || nowMs(),
             disabledAt: Number.isFinite(disabledAtMs) ? disabledAtMs : null,
@@ -495,6 +534,30 @@ export class SessionDurableObject {
             progress: evaluateCard(card, this.drawnNumbers),
           };
         }
+
+        const storedApprovals = await this.state.storage.get<Record<string, BingoApprovalState>>("bingoApprovals");
+        if (storedApprovals && typeof storedApprovals === "object") {
+          this.bingoApprovals = storedApprovals;
+        }
+        const storedRequired = await this.state.storage.get<boolean>("bingoApprovalRequired");
+        if (typeof storedRequired === "boolean") {
+          this.bingoApprovalRequired = storedRequired;
+        }
+        const seedAt = nowMs();
+        let seeded = false;
+        for (const player of Object.values(this.players)) {
+          if (!player.progress.isBingo) continue;
+          if (this.bingoApprovals[player.id]) continue;
+          this.bingoApprovals[player.id] = {
+            participantId: player.id,
+            firstBingoAt: seedAt,
+            approvedAt: seedAt,
+            acknowledgedAt: seedAt,
+            approvedBy: "system",
+          };
+          seeded = true;
+        }
+        if (seeded) this.persistBingoApprovals();
 
         if (commitRows.length > 0) {
           const lastCommitRow = commitRows[commitRows.length - 1];
@@ -613,6 +676,7 @@ export class SessionDurableObject {
       lastNumber,
       lastNumbers,
       stats,
+      bingoApprovalRequired: this.bingoApprovalRequired,
       fx: {
         actualReachIntensity,
         effectiveReachIntensity,
@@ -629,6 +693,7 @@ export class SessionDurableObject {
 
     if (attachment.role === "participant") {
       const player = attachment.playerId ? this.players[attachment.playerId] : null;
+      const approval = player ? this.bingoApprovals[player.id] ?? null : null;
       return {
         ...base,
         role: "participant",
@@ -642,6 +707,14 @@ export class SessionDurableObject {
               disabledAt: player.disabledAt,
               card: player.card,
               progress: player.progress,
+            }
+          : null,
+        bingoApproval: approval
+          ? {
+              firstBingoAt: approval.firstBingoAt,
+              approvedAt: approval.approvedAt,
+              acknowledgedAt: approval.acknowledgedAt,
+              approvedBy: approval.approvedBy,
             }
           : null,
       };
@@ -676,6 +749,14 @@ export class SessionDurableObject {
     }
 
     const players = computed.getPrivilegedPlayers();
+    const approvalSummaries = this.listBingoApprovals().map((entry) => ({
+      participantId: entry.participantId,
+      displayName: this.players[entry.participantId]?.displayName ?? entry.participantId,
+      firstBingoAt: entry.firstBingoAt,
+      approvedAt: entry.approvedAt,
+      acknowledgedAt: entry.acknowledgedAt,
+      approvedBy: entry.approvedBy,
+    }));
 
     if (attachment.role === "mod") {
       return {
@@ -683,6 +764,7 @@ export class SessionDurableObject {
         role: "mod",
         drawnNumbers: this.drawnNumbers,
         players,
+        bingoApprovals: approvalSummaries,
       };
     }
 
@@ -692,6 +774,7 @@ export class SessionDurableObject {
         role: "admin",
         drawnNumbers: this.drawnNumbers,
         players,
+        bingoApprovals: approvalSummaries,
         pendingDraw: this.pendingDraw
           ? {
               preparedAt: this.pendingDraw.preparedAt,
@@ -850,7 +933,10 @@ export class SessionDurableObject {
       const existing = existingRows[0];
       await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
       const cached = this.players[existing.id];
-      if (cached) cached.displayName = displayName;
+      if (cached) {
+        cached.displayName = displayName;
+        if (!cached.deviceId && existing.deviceId) cached.deviceId = existing.deviceId;
+      }
       const warning = buildCapacityWarning(countActivePlayers(this.players));
       this.touch();
       this.broadcastSnapshots();
@@ -886,7 +972,10 @@ export class SessionDurableObject {
         const existing = retryRows[0];
         await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
         const cached = this.players[existing.id];
-        if (cached) cached.displayName = displayName;
+        if (cached) {
+          cached.displayName = displayName;
+          if (!cached.deviceId && existing.deviceId) cached.deviceId = existing.deviceId;
+        }
         const warning = buildCapacityWarning(countActivePlayers(this.players));
         this.touch();
         this.broadcastSnapshots();
@@ -898,6 +987,7 @@ export class SessionDurableObject {
     this.players[playerId] = {
       id: playerId,
       status: "active",
+      deviceId,
       displayName,
       joinedAt: Date.parse(createdAt) || nowMs(),
       disabledAt: null,
@@ -1106,6 +1196,7 @@ export class SessionDurableObject {
         player: {
           id,
           status: "active",
+          deviceId,
           displayName,
           joinedAt,
           disabledAt: null,
@@ -1171,6 +1262,8 @@ export class SessionDurableObject {
     this.devFxIntensityOverride = null;
     this.spotlight = defaultSpotlightState(nowMs());
     this.lastCommit = null;
+    this.bingoApprovals = {};
+    this.persistBingoApprovals();
     this.pushEvent({ type: "admin.dev.reset", role: "admin", detail: revive ? "revive" : "no-revive" });
     this.touch();
     this.broadcastSnapshots();
@@ -1199,6 +1292,22 @@ export class SessionDurableObject {
       newBingoIds.push(id);
     }
     const newBingoNames = newBingoIds.map((id) => this.players[id]?.displayName ?? id);
+    if (newBingoIds.length) {
+      const stamp = nowMs();
+      let changed = false;
+      for (const id of newBingoIds) {
+        if (!this.bingoApprovals[id]) {
+          const entry = this.ensureBingoApprovalState(id, stamp);
+          if (!this.bingoApprovalRequired) {
+            entry.approvedAt = stamp;
+            entry.acknowledgedAt = stamp;
+            entry.approvedBy = "system";
+          }
+          changed = true;
+        }
+      }
+      if (changed) this.persistBingoApprovals();
+    }
 
     const seq = nextDrawnNumbers.length;
     const stats = computeSessionStats(activePlayers.map((p) => nextProgressById[p.id]));
@@ -1448,6 +1557,54 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true });
   }
 
+  private async handleAdminBingoSetting(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const requiredRaw = (body as { required?: unknown }).required;
+    if (typeof requiredRaw !== "boolean") return textResponse("required must be boolean", { status: 400 });
+
+    const prev = this.bingoApprovalRequired;
+    this.bingoApprovalRequired = requiredRaw;
+    if (prev !== requiredRaw) {
+      this.state.waitUntil(this.state.storage.put("bingoApprovalRequired", this.bingoApprovalRequired));
+      if (!this.bingoApprovalRequired) {
+        const stamp = nowMs();
+        let changed = false;
+        for (const entry of Object.values(this.bingoApprovals)) {
+          if (entry.approvedAt === null) {
+            entry.approvedAt = stamp;
+            entry.approvedBy = "system";
+            changed = true;
+          }
+          if (entry.acknowledgedAt === null) {
+            entry.acknowledgedAt = stamp;
+            changed = true;
+          }
+        }
+        if (changed) this.persistBingoApprovals();
+      }
+      this.pushEvent({
+        type: "admin.bingo.setting",
+        role: "admin",
+        detail: this.bingoApprovalRequired ? "required=1" : "required=0",
+      });
+      this.touch();
+      this.broadcastSnapshots();
+    }
+
+    return jsonResponse({ ok: true, required: this.bingoApprovalRequired });
+  }
+
   private async handleAdminEnd(request: Request): Promise<Response> {
     const loadError = await this.ensureLoaded(request);
     if (loadError) return loadError;
@@ -1612,6 +1769,105 @@ export class SessionDurableObject {
     return jsonResponse({ ok: true });
   }
 
+  private async handleModBingoApprove(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "mod");
+    if (authError) return authError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+
+    if (!this.bingoApprovalRequired) {
+      return jsonResponse({ ok: true, approved: 0, disabled: true });
+    }
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const approveAll = Boolean((body as { approveAll?: unknown }).approveAll);
+    const ids = approveAll ? [] : sanitizeParticipantIds((body as { participantIds?: unknown }).participantIds);
+    const updatedBy = clampSpotlightUpdatedBy((body as { updatedBy?: unknown }).updatedBy) ?? "mod";
+
+    const pending = this.listBingoApprovals().filter((entry) => entry.approvedAt === null && entry.acknowledgedAt === null);
+    const targets = approveAll ? pending.map((entry) => entry.participantId) : ids;
+
+    let changed = false;
+    const approvedAt = nowMs();
+    for (const id of targets) {
+      const entry = this.bingoApprovals[id];
+      if (!entry) continue;
+      if (entry.approvedAt !== null || entry.acknowledgedAt !== null) continue;
+      entry.approvedAt = approvedAt;
+      entry.approvedBy = updatedBy;
+      changed = true;
+    }
+
+    if (changed) {
+      this.persistBingoApprovals();
+      this.pushEvent({
+        type: "mod.bingo.approve",
+        role: "mod",
+        by: updatedBy,
+        detail: approveAll ? `approveAll count=${targets.length}` : `count=${targets.length}`,
+      });
+      this.touch();
+      this.broadcastSnapshots();
+    }
+
+    return jsonResponse({ ok: true, approved: targets.length });
+  }
+
+  private async handleParticipantBingoAck(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const activeError = this.assertActiveSession();
+    if (activeError) return activeError;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const participantIdRaw = (body as { participantId?: unknown }).participantId;
+    const participantId = typeof participantIdRaw === "string" ? participantIdRaw.trim() : "";
+    const deviceId = clampDeviceId((body as { deviceId?: unknown }).deviceId);
+    if (!participantId) return textResponse("participantId required", { status: 400 });
+    if (!deviceId) return textResponse("deviceId required", { status: 400 });
+
+    const player = this.players[participantId];
+    if (!player) return textResponse("participant not found", { status: 404 });
+
+    if (player.deviceId && player.deviceId !== deviceId) return textResponse("forbidden", { status: 403 });
+    if (!player.deviceId) {
+      const db = getDb(this.env);
+      const rows = await db
+        .select()
+        .from(participants)
+        .where(and(eq(participants.sessionId, this.session!.id), eq(participants.id, participantId), eq(participants.deviceId, deviceId)))
+        .limit(1);
+      if (!rows.length) return textResponse("forbidden", { status: 403 });
+      player.deviceId = deviceId;
+    }
+
+    const entry = this.bingoApprovals[participantId];
+    if (!entry) return textResponse("bingo approval not found", { status: 409 });
+    if (entry.acknowledgedAt) return jsonResponse({ ok: true, acknowledgedAt: entry.acknowledgedAt });
+    if (!entry.approvedAt && this.bingoApprovalRequired) return textResponse("not approved yet", { status: 409 });
+
+    entry.acknowledgedAt = nowMs();
+    this.persistBingoApprovals();
+    this.pushEvent({ type: "participant.bingo.ack", role: "participant", detail: participantId });
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true, acknowledgedAt: entry.acknowledgedAt });
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -1676,8 +1932,11 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/dev/reset" && request.method === "POST") return this.handleAdminDevReset(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/audio" && request.method === "POST") return this.handleAdminAudio(request);
+    if (url.pathname === "/admin/bingo/setting" && request.method === "POST") return this.handleAdminBingoSetting(request);
     if (url.pathname === "/admin/key" && request.method === "POST") return this.handleAdminKey(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
+    if (url.pathname === "/participant/bingo/ack" && request.method === "POST") return this.handleParticipantBingoAck(request);
+    if (url.pathname === "/mod/bingo/approve" && request.method === "POST") return this.handleModBingoApprove(request);
     if (url.pathname === "/mod/participant/status" && request.method === "POST") return this.handleModParticipantStatus(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);
 

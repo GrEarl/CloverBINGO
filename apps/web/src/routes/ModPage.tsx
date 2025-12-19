@@ -64,6 +64,7 @@ export default function ModPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [disableReason, setDisableReason] = useState("");
+  const [approving, setApproving] = useState(false);
 
   const clientIdKey = `cloverbingo:mod:${code}:clientId`;
   const [clientId, setClientId] = useLocalStorageString(clientIdKey, "");
@@ -105,6 +106,17 @@ export default function ModPage() {
     if (!selectedId) return null;
     return players.find((p) => p.id === selectedId) ?? null;
   }, [players, selectedId]);
+
+  const bingoApprovals = useMemo(() => view?.bingoApprovals ?? [], [view?.bingoApprovals]);
+  const approvalRequired = view?.bingoApprovalRequired ?? true;
+  const pendingApprovals = useMemo(
+    () => (approvalRequired ? bingoApprovals.filter((a) => a.approvedAt === null && a.acknowledgedAt === null) : []),
+    [bingoApprovals, approvalRequired],
+  );
+  const approvedWaitingAck = useMemo(
+    () => (approvalRequired ? bingoApprovals.filter((a) => a.approvedAt !== null && a.acknowledgedAt === null) : []),
+    [bingoApprovals, approvalRequired],
+  );
 
   function toggle(id: string) {
     setDraft((prev) => {
@@ -184,6 +196,27 @@ export default function ModPage() {
     }
   }
 
+  async function approveBingo(participantIds: string[], approveAll: boolean) {
+    if (!view) return;
+    if (view.sessionStatus !== "active") {
+      setError("このセッションは終了しているため操作できません。");
+      return;
+    }
+    setApproving(true);
+    setError(null);
+    try {
+      await postJson(`/api/mod/bingo/approve?code=${encodeURIComponent(code)}`, {
+        participantIds,
+        approveAll,
+        updatedBy: effectiveUpdatedBy,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "unknown error");
+    } finally {
+      setApproving(false);
+    }
+  }
+
   return (
     <main className="min-h-dvh bg-neutral-950 text-neutral-50">
       <div className="mx-auto max-w-5xl px-6 py-10">
@@ -248,6 +281,48 @@ export default function ModPage() {
         {view && (
           <div className="mt-6 grid gap-4 lg:grid-cols-[360px_1fr] lg:items-start">
           <div className="grid gap-4 lg:sticky lg:top-6">
+            <Card>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base font-semibold">初回BINGO承認</h2>
+                <Button
+                  disabled={approving || !approvalRequired || pendingApprovals.length === 0 || view.sessionStatus !== "active"}
+                  onClick={() => void approveBingo([], true)}
+                  size="sm"
+                  variant="primary"
+                >
+                  {approving ? "承認中..." : "未承認BINGOを一括承認"}
+                </Button>
+              </div>
+              <div className="mt-2 text-xs text-neutral-500">
+                pending <span className="font-mono text-neutral-200">{pendingApprovals.length}</span> / acknowledged待ち{" "}
+                <span className="font-mono text-neutral-200">{approvedWaitingAck.length}</span>
+              </div>
+              {!approvalRequired && <div className="mt-2 text-xs text-neutral-500">※ Adminが承認不要に設定中</div>}
+              <div className="mt-3 grid gap-2 text-xs text-neutral-300">
+                {pendingApprovals.length === 0 && <div className="text-neutral-600">未承認はありません</div>}
+                {pendingApprovals.map((entry) => (
+                  <div key={entry.participantId} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-neutral-100">{entry.displayName}</div>
+                      <div className="text-[0.65rem] text-neutral-500">first: {relativeFromNow(entry.firstBingoAt)}</div>
+                    </div>
+                    <Button
+                      disabled={approving || !approvalRequired || view.sessionStatus !== "active"}
+                      onClick={() => void approveBingo([entry.participantId], false)}
+                      size="sm"
+                      variant="secondary"
+                    >
+                      承認
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {approvedWaitingAck.length > 0 && (
+                <div className="mt-3 border-t border-neutral-800/60 pt-3 text-[0.65rem] text-neutral-500">
+                  承認済み（了承待ち）: {approvedWaitingAck.map((e) => e.displayName).join("、")}
+                </div>
+              )}
+            </Card>
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold">スポットライト</h2>

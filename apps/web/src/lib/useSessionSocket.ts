@@ -90,6 +90,22 @@ export type ConnectionInfo = {
   connectedAt: number;
 };
 
+export type BingoApprovalSummary = {
+  participantId: string;
+  displayName: string;
+  firstBingoAt: number;
+  approvedAt: number | null;
+  acknowledgedAt: number | null;
+  approvedBy: string | null;
+};
+
+export type BingoApprovalSelf = {
+  firstBingoAt: number;
+  approvedAt: number | null;
+  acknowledgedAt: number | null;
+  approvedBy: string | null;
+};
+
 export type LastCommitSummary = {
   seq: number;
   number: number;
@@ -112,9 +128,11 @@ export type ParticipantSnapshot = {
   lastNumbers: number[];
   drawnNumbers: number[];
   stats: SessionStats;
+  bingoApprovalRequired?: boolean;
   fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   player: (Player & { card: number[][] }) | null;
+  bingoApproval?: BingoApprovalSelf | null;
 };
 
 export type DisplaySnapshot = {
@@ -131,6 +149,7 @@ export type DisplaySnapshot = {
   lastNumbers: number[];
   drawnNumbers: number[];
   stats: SessionStats;
+  bingoApprovalRequired?: boolean;
   fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   screen: DisplayScreen;
@@ -153,10 +172,12 @@ export type ModSnapshot = {
   lastNumber: number | null;
   lastNumbers: number[];
   stats: SessionStats;
+  bingoApprovalRequired?: boolean;
   fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   drawnNumbers?: number[];
   players: Array<Player & { card: number[][] }>;
+  bingoApprovals?: BingoApprovalSummary[];
 };
 
 export type AdminSnapshot = {
@@ -172,10 +193,12 @@ export type AdminSnapshot = {
   lastNumber: number | null;
   lastNumbers: number[];
   stats: SessionStats;
+  bingoApprovalRequired?: boolean;
   fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   drawnNumbers?: number[];
   players: Array<Player & { card: number[][] }>;
+  bingoApprovals?: BingoApprovalSummary[];
   pendingDraw: null | {
     preparedAt: number;
     number: number;
@@ -200,6 +223,7 @@ export type ObserverSnapshot = {
   lastNumbers: number[];
   drawnNumbers: number[];
   stats: SessionStats;
+  bingoApprovalRequired?: boolean;
   fx?: FxSnapshot;
   spotlight: SpotlightSnapshot;
   players: Array<Player & { card: number[][] }>;

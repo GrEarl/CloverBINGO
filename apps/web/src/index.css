@@ -294,6 +294,12 @@ body {
 }
 
 /* Reach highlight */
+@property --reach-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 .reach-cell {
   position: relative;
   z-index: 0;
@@ -302,9 +308,11 @@ body {
 .reach-cell::before {
   content: "";
   position: absolute;
-  inset: -2px;
-  border-radius: 0.35rem;
+  inset: -3px;
+  padding: 2px;
+  border-radius: 0.4rem;
   background: conic-gradient(
+    from var(--reach-angle),
     #ff3b30,
     #ff9f0a,
     #ffd60a,
@@ -314,18 +322,21 @@ body {
     #ff2d55,
     #ff3b30
   );
-  animation: reach-spin 2.6s linear infinite;
-  opacity: 0.9;
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.18));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: reach-spin 2.4s linear infinite;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.16));
   pointer-events: none;
   z-index: -1;
 }
 
 @keyframes reach-spin {
   0% {
-    transform: rotate(0deg);
+    --reach-angle: 0deg;
   }
   100% {
-    transform: rotate(360deg);
+    --reach-angle: 360deg;
   }
 }

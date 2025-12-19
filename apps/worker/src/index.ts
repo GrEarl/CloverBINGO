@@ -222,6 +222,14 @@ app.post("/api/admin/audio", async (c) => {
   return forwardToSession(c, session, "/admin/audio");
 });
 
+app.post("/api/admin/bingo/setting", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/bingo/setting");
+});
+
 app.post("/api/admin/key", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);
@@ -312,12 +320,28 @@ app.post("/api/mod/spotlight", async (c) => {
   return forwardToSession(c, session, "/mod/spotlight");
 });
 
+app.post("/api/mod/bingo/approve", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/mod/bingo/approve");
+});
+
 app.post("/api/mod/participant/status", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);
   const session = await resolveSessionByCode(c.env, code);
   if (!session) return c.text("session not found", 404);
   return forwardToSession(c, session, "/mod/participant/status");
+});
+
+app.post("/api/participant/bingo/ack", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/participant/bingo/ack");
 });
 
 app.post("/api/dev/create-session", async (c) => {
