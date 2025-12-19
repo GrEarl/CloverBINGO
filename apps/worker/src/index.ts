@@ -10,6 +10,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 const ADMIN_INVITE_COOKIE = "cloverbingo_admin";
 const MOD_INVITE_COOKIE = "cloverbingo_mod";
+const OBSERVER_INVITE_COOKIE = "cloverbingo_observer";
 const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24;
 
 function buildAuthCookieHeader(name: string, token: string, requestUrl: URL): string {
@@ -115,8 +116,22 @@ app.post("/api/invite/enter", async (c) => {
   if (session.status !== "active") return c.text("session ended", 410);
 
   const url = new URL(c.req.raw.url);
-  const cookieName = invite.role === "admin" ? ADMIN_INVITE_COOKIE : invite.role === "mod" ? MOD_INVITE_COOKIE : null;
-  const redirectTo = invite.role === "admin" ? `/s/${session.code}/admin` : invite.role === "mod" ? `/s/${session.code}/mod` : null;
+  const cookieName =
+    invite.role === "admin"
+      ? ADMIN_INVITE_COOKIE
+      : invite.role === "mod"
+        ? MOD_INVITE_COOKIE
+        : invite.role === "observer"
+          ? OBSERVER_INVITE_COOKIE
+          : null;
+  const redirectTo =
+    invite.role === "admin"
+      ? `/s/${session.code}/admin`
+      : invite.role === "mod"
+        ? `/s/${session.code}/mod`
+        : invite.role === "observer"
+          ? `/s/${session.code}/observer`
+          : null;
   if (!cookieName || !redirectTo) return c.text("invalid role", 500);
 
   return jsonResponse(
@@ -197,6 +212,14 @@ app.post("/api/admin/reel", async (c) => {
   const session = await resolveSessionByCode(c.env, code);
   if (!session) return c.text("session not found", 404);
   return forwardToSession(c, session, "/admin/reel");
+});
+
+app.post("/api/admin/audio", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/audio");
 });
 
 app.post("/api/admin/end", async (c) => {
@@ -301,11 +324,13 @@ app.post("/api/dev/create-session", async (c) => {
     const code = crypto.randomUUID().slice(0, 6).toUpperCase();
     const adminToken = crypto.randomUUID();
     const modToken = crypto.randomUUID();
+    const observerToken = crypto.randomUUID();
     try {
       await db.insert(sessions).values({ id: sessionId, code, status: "active", createdAt, endedAt: null });
       await db.insert(invites).values([
         { token: adminToken, sessionId, role: "admin", createdAt, label: "admin" },
         { token: modToken, sessionId, role: "mod", createdAt, label: "mod" },
+        { token: observerToken, sessionId, role: "observer", createdAt, label: "observer" },
       ]);
     } catch {
       // likely code collision; retry
@@ -317,14 +342,17 @@ app.post("/api/dev/create-session", async (c) => {
       sessionCode: code,
       adminToken,
       modToken,
+      observerToken,
       urls: {
         join: `/s/${code}`,
         displayTen: `/s/${code}/display/ten`,
         displayOne: `/s/${code}/display/one`,
         admin: `/s/${code}/admin?token=${adminToken}`,
         mod: `/s/${code}/mod?token=${modToken}`,
+        observer: `/s/${code}/observer?token=${observerToken}`,
         adminInvite: `/i/${adminToken}`,
         modInvite: `/i/${modToken}`,
+        observerInvite: `/i/${observerToken}`,
         compatAdmin: `/admin/${code}?token=${adminToken}`,
         compatMod: `/mod/${code}?token=${modToken}`,
       },

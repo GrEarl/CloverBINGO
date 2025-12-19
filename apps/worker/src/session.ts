@@ -5,7 +5,7 @@ import type { Bindings } from "./bindings";
 import { getDb } from "./db/client";
 import { drawCommits, invites, participants, sessions } from "./db/schema";
 
-type Role = "participant" | "display" | "admin" | "mod";
+type Role = "participant" | "display" | "admin" | "mod" | "observer";
 type DisplayScreen = "ten" | "one";
 
 type ReelStatus = "idle" | "spinning" | "stopped";
@@ -14,7 +14,10 @@ type ParticipantStatus = "active" | "disabled";
 
 const ADMIN_INVITE_COOKIE = "cloverbingo_admin";
 const MOD_INVITE_COOKIE = "cloverbingo_mod";
+const OBSERVER_INVITE_COOKIE = "cloverbingo_observer";
 const MAX_PLAYERS = 200;
+const MAX_EVENT_LOG = 200;
+const MAX_ERROR_LOG = 120;
 
 type SpotlightState = {
   version: number;
@@ -39,6 +42,56 @@ type PendingDrawState = {
     ten: number | null;
     one: number | null;
   };
+};
+
+type PendingPreview = {
+  newBingoIds: string[];
+  newBingoNames: string[];
+};
+
+type AudioStatus = {
+  bgm: {
+    label: string | null;
+    state: "playing" | "paused" | "stopped";
+    updatedAt: number | null;
+  };
+  sfx: {
+    label: string | null;
+    at: number | null;
+  };
+};
+
+type ObserverEvent = {
+  id: number;
+  at: number;
+  type: string;
+  role?: Role;
+  by?: string | null;
+  detail?: string | null;
+};
+
+type ObserverError = {
+  id: number;
+  at: number;
+  scope: string;
+  message: string;
+  detail?: string | null;
+};
+
+type ConnectionInfo = {
+  id: string;
+  role: Role;
+  screen?: DisplayScreen;
+  playerId?: string;
+  connectedAt: number;
+};
+
+type LastCommitSummary = {
+  seq: number;
+  number: number;
+  committedAt: string;
+  openedPlayers: number;
+  newBingoNames: string[];
 };
 
 type PlayerState = {
@@ -66,6 +119,8 @@ type WsAttachment = {
   role: Role;
   playerId?: string;
   screen?: DisplayScreen;
+  connectedAt?: number;
+  connectionId?: string;
 };
 
 type SpotlightPlayerSummary = {
@@ -202,6 +257,14 @@ function clampDisabledReason(input: unknown): string | null {
   return trimmed;
 }
 
+function clampAudioLabel(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed.length < 1) return null;
+  if (trimmed.length > 80) return trimmed.slice(0, 80);
+  return trimmed;
+}
+
 function sanitizeSpotlightIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((v) => typeof v === "string").slice(0, 6);
@@ -216,6 +279,21 @@ function digitsOf(n: number): { ten: number; one: number } {
   return { ten: Math.floor(normalized / 10), one: normalized % 10 };
 }
 
+function countPlayersWithNumber(players: Record<string, PlayerState>, n: number): number {
+  let count = 0;
+  for (const player of Object.values(players)) {
+    if (player.status !== "active") continue;
+    const card = player.card;
+    for (const row of card) {
+      if (row.includes(n)) {
+        count += 1;
+        break;
+      }
+    }
+  }
+  return count;
+}
+
 function computeImpact(players: Record<string, PlayerState>, hypotheticallyDrawn: number[], nextNumber: number) {
   let reachPlayers = 0;
   let bingoPlayers = 0;
@@ -227,6 +305,26 @@ function computeImpact(players: Record<string, PlayerState>, hypotheticallyDrawn
     if (progress.isBingo) bingoPlayers += 1;
   }
   return { reachPlayers, bingoPlayers };
+}
+
+function computePendingPreview(players: Record<string, PlayerState>, hypotheticallyDrawn: number[], nextNumber: number): PendingPreview {
+  const beforeBingo = new Set<string>();
+  for (const player of Object.values(players)) {
+    if (player.status !== "active") continue;
+    if (player.progress.isBingo) beforeBingo.add(player.id);
+  }
+
+  const nextDrawn = hypotheticallyDrawn.concat([nextNumber]);
+  const newBingoIds: string[] = [];
+  for (const player of Object.values(players)) {
+    if (player.status !== "active") continue;
+    const progress = evaluateCard(player.card, nextDrawn);
+    if (progress.isBingo && !beforeBingo.has(player.id)) {
+      newBingoIds.push(player.id);
+    }
+  }
+  const newBingoNames = newBingoIds.map((id) => players[id]?.displayName ?? id);
+  return { newBingoIds, newBingoNames };
 }
 
 function parseJsonBody(input: string | ArrayBuffer): unknown | null {
@@ -266,6 +364,16 @@ export class SessionDurableObject {
   private pendingDraw: PendingDrawState | null = null;
 
   // volatile (do not persist)
+  private eventSeq = 0;
+  private errorSeq = 0;
+  private eventLog: ObserverEvent[] = [];
+  private errorLog: ObserverError[] = [];
+  private eventCounts: Record<string, number> = {};
+  private audioStatus: AudioStatus = {
+    bgm: { label: null, state: "stopped", updatedAt: null },
+    sfx: { label: null, at: null },
+  };
+  private lastCommit: LastCommitSummary | null = null;
   private devFxIntensityOverride: ReachIntensity | null = null;
   private spotlight: SpotlightState = defaultSpotlightState(nowMs());
 
@@ -273,6 +381,41 @@ export class SessionDurableObject {
 
   private touch(): void {
     this.updatedAt = nowMs();
+  }
+
+  private pushEvent(entry: Omit<ObserverEvent, "id" | "at"> & { at?: number }): void {
+    const at = entry.at ?? nowMs();
+    const id = ++this.eventSeq;
+    this.eventLog.push({ id, at, ...entry });
+    if (this.eventLog.length > MAX_EVENT_LOG) {
+      this.eventLog.splice(0, this.eventLog.length - MAX_EVENT_LOG);
+    }
+    this.eventCounts[entry.type] = (this.eventCounts[entry.type] ?? 0) + 1;
+  }
+
+  private pushError(scope: string, err: unknown, detail?: string | null): void {
+    const message = err instanceof Error ? err.message : String(err);
+    const id = ++this.errorSeq;
+    this.errorLog.push({ id, at: nowMs(), scope, message, detail: detail ?? null });
+    if (this.errorLog.length > MAX_ERROR_LOG) {
+      this.errorLog.splice(0, this.errorLog.length - MAX_ERROR_LOG);
+    }
+  }
+
+  private buildConnections(): ConnectionInfo[] {
+    const list: ConnectionInfo[] = [];
+    for (const ws of this.state.getWebSockets()) {
+      const attachment = getAttachmentFromWebSocket(ws);
+      if (!attachment) continue;
+      list.push({
+        id: attachment.connectionId ?? "unknown",
+        role: attachment.role,
+        screen: attachment.screen,
+        playerId: attachment.playerId,
+        connectedAt: attachment.connectedAt ?? nowMs(),
+      });
+    }
+    return list;
   }
 
   private getSessionIdFromRequest(request: Request): string | null {
@@ -337,6 +480,28 @@ export class SessionDurableObject {
           };
         }
 
+        if (commitRows.length > 0) {
+          const lastCommitRow = commitRows[commitRows.length - 1];
+          const prevDrawn = this.drawnNumbers.slice(0, -1);
+          const newBingoNames: string[] = [];
+          for (const player of Object.values(this.players)) {
+            if (player.status !== "active") continue;
+            const prev = evaluateCard(player.card, prevDrawn);
+            if (prev.isBingo) continue;
+            const next = evaluateCard(player.card, this.drawnNumbers);
+            if (next.isBingo) newBingoNames.push(player.displayName);
+          }
+          this.lastCommit = {
+            seq: lastCommitRow.seq,
+            number: lastCommitRow.number,
+            committedAt: lastCommitRow.committedAt,
+            openedPlayers: countPlayersWithNumber(this.players, lastCommitRow.number),
+            newBingoNames,
+          };
+        } else {
+          this.lastCommit = null;
+        }
+
         this.updatedAt = loadedUpdatedAt || nowMs();
         this.loaded = true;
       })();
@@ -346,6 +511,7 @@ export class SessionDurableObject {
       await this.loadPromise;
     } catch (err) {
       console.error("failed to load session", err);
+      this.pushError("ensureLoaded", err);
       this.loadPromise = null;
       this.loaded = false;
       return textResponse("failed to load session", { status: 500 });
@@ -363,9 +529,10 @@ export class SessionDurableObject {
     return null;
   }
 
-  private async assertInvite(request: Request, requiredRole: "admin" | "mod"): Promise<Response | null> {
+  private async assertInvite(request: Request, requiredRole: "admin" | "mod" | "observer"): Promise<Response | null> {
     if (!this.session) return textResponse("session not found", { status: 404 });
-    const cookieName = requiredRole === "admin" ? ADMIN_INVITE_COOKIE : MOD_INVITE_COOKIE;
+    const cookieName =
+      requiredRole === "admin" ? ADMIN_INVITE_COOKIE : requiredRole === "mod" ? MOD_INVITE_COOKIE : OBSERVER_INVITE_COOKIE;
     const token = getCookieFromRequest(request, cookieName);
     if (!token || token.trim() === "") return textResponse("missing token", { status: 401 });
 
@@ -519,6 +686,33 @@ export class SessionDurableObject {
               state: this.pendingDraw.state,
             }
           : null,
+      };
+    }
+
+    if (attachment.role === "observer") {
+      const preview = this.pendingDraw ? computePendingPreview(this.players, this.drawnNumbers, this.pendingDraw.number) : null;
+      return {
+        ...base,
+        role: "observer",
+        drawnNumbers: this.drawnNumbers,
+        players,
+        pendingDraw: this.pendingDraw
+          ? {
+              preparedAt: this.pendingDraw.preparedAt,
+              number: this.pendingDraw.number,
+              impact: this.pendingDraw.impact,
+              reel: this.pendingDraw.reel,
+              stoppedDigits: this.pendingDraw.stoppedDigits,
+              state: this.pendingDraw.state,
+              preview,
+            }
+          : null,
+        eventLog: this.eventLog,
+        errorLog: this.errorLog,
+        eventCounts: this.eventCounts,
+        audio: this.audioStatus,
+        connections: this.buildConnections(),
+        lastCommit: this.lastCommit,
       };
     }
 
@@ -713,6 +907,7 @@ export class SessionDurableObject {
     const ensured = await this.ensurePendingDraw();
     if (ensured instanceof Response) return ensured;
 
+    this.pushEvent({ type: "admin.prepare", role: "admin", detail: `number=${ensured.number}` });
     this.broadcastEvent(
       (a) => a?.role === "admin",
       { type: "draw.prepared", number: ensured.number, preparedAt: ensured.preparedAt, impact: ensured.impact },
@@ -757,6 +952,7 @@ export class SessionDurableObject {
       stoppedDigits: { ten: null, one: null },
     };
 
+    this.pushEvent({ type: "admin.dev.prepare", role: "admin", detail: `number=${number}` });
     this.broadcastEvent(
       (a) => a?.role === "admin",
       { type: "draw.prepared", number, preparedAt, impact: this.pendingDraw.impact },
@@ -795,6 +991,11 @@ export class SessionDurableObject {
       this.devFxIntensityOverride = v as ReachIntensity;
     }
 
+    this.pushEvent({
+      type: "admin.dev.tune",
+      role: "admin",
+      detail: this.devFxIntensityOverride === null ? "auto" : `intensity=${this.devFxIntensityOverride}`,
+    });
     this.touch();
     this.broadcastSnapshots();
 
@@ -894,10 +1095,12 @@ export class SessionDurableObject {
         this.players[item.player.id] = item.player;
       }
     } catch (err) {
+      this.pushError("admin.dev.seed", err instanceof Error ? err.message : String(err));
       const msg = err instanceof Error ? err.message : "failed to seed participants";
       return textResponse(`seed failed: ${msg}`, { status: 500 });
     }
 
+    this.pushEvent({ type: "admin.dev.seed", role: "admin", detail: `added=${addCount}` });
     this.refreshPendingDrawImpact();
     this.touch();
     this.broadcastSnapshots();
@@ -937,6 +1140,8 @@ export class SessionDurableObject {
     this.pendingDraw = null;
     this.devFxIntensityOverride = null;
     this.spotlight = defaultSpotlightState(nowMs());
+    this.lastCommit = null;
+    this.pushEvent({ type: "admin.dev.reset", role: "admin", detail: revive ? "revive" : "no-revive" });
     this.touch();
     this.broadcastSnapshots();
     return jsonResponse({ ok: true, revived: revive });
@@ -982,6 +1187,7 @@ export class SessionDurableObject {
       });
     } catch (err) {
       console.error("commit failed", err);
+      this.pushError("commit", err);
       if (this.pendingDraw) {
         this.pendingDraw.state = "prepared";
         this.pendingDraw.reel.ten = "idle";
@@ -993,6 +1199,16 @@ export class SessionDurableObject {
       this.broadcastSnapshots();
       return textResponse("commit failed", { status: 500 });
     }
+
+    const openedPlayers = countPlayersWithNumber(this.players, number);
+    this.lastCommit = {
+      seq,
+      number,
+      committedAt,
+      openedPlayers,
+      newBingoNames,
+    };
+    this.pushEvent({ type: "draw.committed", detail: `number=${number} newBingo=${newBingoNames.length}` });
 
     this.drawnNumbers = nextDrawnNumbers;
     for (const player of Object.values(this.players)) {
@@ -1038,6 +1254,7 @@ export class SessionDurableObject {
     if (pending.state !== "prepared") return textResponse("not prepared", { status: 409 });
     if (pending.reel.ten !== "idle" || pending.reel.one !== "idle") return textResponse("reel not idle", { status: 409 });
 
+    this.pushEvent({ type: "admin.go", role: "admin", detail: `number=${pending.number}` });
     pending.state = "spinning";
     pending.reel.ten = "spinning";
     pending.reel.one = "spinning";
@@ -1047,6 +1264,8 @@ export class SessionDurableObject {
     const startedAt = nowMs();
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "ten", at: startedAt });
     this.broadcastEvent((a) => a?.role === "display", { type: "draw.spin", action: "start", digit: "one", at: startedAt });
+    this.pushEvent({ type: "draw.spin.start", detail: "digit=ten" });
+    this.pushEvent({ type: "draw.spin.start", detail: "digit=one" });
 
     const reachCount = computeSessionStats(Object.values(this.players).filter((p) => p.status === "active").map((p) => p.progress)).reachPlayers;
     const actualIntensity = reachIntensityFromCount(reachCount);
@@ -1078,6 +1297,7 @@ export class SessionDurableObject {
             at: nowMs(),
             digitValue,
           });
+          this.pushEvent({ type: "draw.spin.stop", detail: `digit=${firstDigit} value=${digitValue}` });
           this.touch();
           this.broadcastSnapshots();
         })(),
@@ -1095,6 +1315,7 @@ export class SessionDurableObject {
             at: nowMs(),
             digitValue,
           });
+          this.pushEvent({ type: "draw.spin.stop", detail: `digit=${secondDigit} value=${digitValue}` });
           this.touch();
           this.broadcastSnapshots();
         })(),
@@ -1110,6 +1331,57 @@ export class SessionDurableObject {
     this.touch();
     this.broadcastSnapshots();
     return jsonResponse({ ok: true, pendingDraw: pending });
+  }
+
+  private async handleAdminAudio(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    let touched = false;
+    const bgm = (body as { bgm?: unknown }).bgm;
+    if (bgm && typeof bgm === "object") {
+      const label = clampAudioLabel((bgm as { label?: unknown }).label);
+      const stateRaw = (bgm as { state?: unknown }).state;
+      const state = stateRaw === "playing" || stateRaw === "paused" || stateRaw === "stopped" ? stateRaw : null;
+      if (state) {
+        this.audioStatus.bgm = {
+          label: label ?? null,
+          state,
+          updatedAt: nowMs(),
+        };
+        this.pushEvent({ type: "audio.bgm", role: "admin", detail: label ? `${state} ${label}` : state });
+        touched = true;
+      }
+    }
+
+    const sfx = (body as { sfx?: unknown }).sfx;
+    if (sfx && typeof sfx === "object") {
+      const label = clampAudioLabel((sfx as { label?: unknown }).label);
+      if (label) {
+        this.audioStatus.sfx = {
+          label,
+          at: nowMs(),
+        };
+        this.pushEvent({ type: "audio.sfx", role: "admin", detail: label });
+        touched = true;
+      }
+    }
+
+    if (touched) {
+      this.touch();
+      this.broadcastSnapshots();
+    }
+
+    return jsonResponse({ ok: true, audio: this.audioStatus });
   }
 
   private async handleAdminEnd(request: Request): Promise<Response> {
@@ -1128,6 +1400,7 @@ export class SessionDurableObject {
     this.session.status = "ended";
     this.session.endedAt = endedAt;
     this.pendingDraw = null;
+    this.pushEvent({ type: "admin.end", role: "admin" });
     this.touch();
     this.broadcastSnapshots();
     return jsonResponse({ ok: true, status: "ended", endedAt });
@@ -1158,6 +1431,13 @@ export class SessionDurableObject {
       updatedAt,
       updatedBy,
     };
+
+    this.pushEvent({
+      type: "mod.spotlight",
+      role: "mod",
+      by: updatedBy,
+      detail: ids.length ? ids.map((id) => this.players[id]?.displayName ?? id).join(", ") : "empty",
+    });
 
     const spotlightPlayers = this.spotlight.ids
       .map((id) => this.players[id])
@@ -1232,6 +1512,13 @@ export class SessionDurableObject {
       }
     }
 
+    this.pushEvent({
+      type: "mod.participant.status",
+      role: "mod",
+      by: updatedBy,
+      detail: `${player.displayName} -> ${nextStatus}`,
+    });
+
     if (nextStatus === "disabled" && this.spotlight.ids.includes(participantId)) {
       const updatedAt = nowMs();
       this.spotlight = {
@@ -1269,7 +1556,10 @@ export class SessionDurableObject {
       if (loadError) return loadError;
 
       const roleRaw = url.searchParams.get("role");
-      const role: Role = roleRaw === "participant" || roleRaw === "display" || roleRaw === "admin" || roleRaw === "mod" ? roleRaw : "participant";
+      const role: Role =
+        roleRaw === "participant" || roleRaw === "display" || roleRaw === "admin" || roleRaw === "mod" || roleRaw === "observer"
+          ? roleRaw
+          : "participant";
 
       if (role === "admin") {
         const authError = await this.assertInvite(request, "admin");
@@ -1279,8 +1569,12 @@ export class SessionDurableObject {
         const authError = await this.assertInvite(request, "mod");
         if (authError) return authError;
       }
+      if (role === "observer") {
+        const authError = await this.assertInvite(request, "observer");
+        if (authError) return authError;
+      }
 
-      const attachment: WsAttachment = { role };
+      const attachment: WsAttachment = { role, connectedAt: nowMs(), connectionId: crypto.randomUUID() };
       if (role === "participant") {
         const playerId = url.searchParams.get("playerId");
         if (playerId && playerId.trim() !== "") attachment.playerId = playerId.trim();
@@ -1297,6 +1591,16 @@ export class SessionDurableObject {
       this.state.acceptWebSocket(server);
       server.serializeAttachment?.(attachment);
       this.sendSnapshot(server);
+      const detailParts: string[] = [];
+      if (attachment.playerId) detailParts.push(`player=${attachment.playerId.slice(0, 8)}`);
+      if (attachment.screen) detailParts.push(`screen=${attachment.screen}`);
+      this.pushEvent({
+        type: "ws.open",
+        role: attachment.role,
+        detail: detailParts.length ? detailParts.join(" ") : null,
+      });
+      this.touch();
+      this.broadcastSnapshots();
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -1307,11 +1611,24 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/dev/seed" && request.method === "POST") return this.handleAdminDevSeed(request);
     if (url.pathname === "/admin/dev/reset" && request.method === "POST") return this.handleAdminDevReset(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
+    if (url.pathname === "/admin/audio" && request.method === "POST") return this.handleAdminAudio(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
     if (url.pathname === "/mod/participant/status" && request.method === "POST") return this.handleModParticipantStatus(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);
 
     return textResponse("not found", { status: 404 });
+  }
+
+  webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    const attachment = getAttachmentFromWebSocket(ws);
+    const detail = reason ? `code=${code} reason=${reason}` : `code=${code}`;
+    this.pushEvent({
+      type: "ws.close",
+      role: attachment?.role,
+      detail,
+    });
+    this.touch();
+    this.broadcastSnapshots();
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {

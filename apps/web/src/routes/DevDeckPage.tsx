@@ -8,7 +8,7 @@ import { cn } from "../lib/cn";
 
 type InviteEnterResponse =
   | { ok: false; error?: string }
-  | { ok: true; role: "admin" | "mod"; sessionCode: string; redirectTo: string };
+  | { ok: true; role: "admin" | "mod" | "observer"; sessionCode: string; redirectTo: string };
 
 function toggleParam(searchParams: URLSearchParams, key: string, onValue: string, offValue: string) {
   const next = new URLSearchParams(searchParams);
@@ -48,6 +48,7 @@ export default function DevDeckPage() {
       one: `/s/${codeEnc}/display/one${displayQuery}`,
       admin: `/s/${codeEnc}/admin?dev=1`,
       mod: `/s/${codeEnc}/mod`,
+      observer: `/s/${codeEnc}/observer`,
       participant: `/s/${codeEnc}`,
     };
   }, [code, fx, safe]);
@@ -166,6 +167,9 @@ export default function DevDeckPage() {
               </a>
               <a className="break-all text-neutral-300 underline hover:text-neutral-100" href={urls.mod} target="_blank" rel="noreferrer">
                 Mod: {urls.mod}
+              </a>
+              <a className="break-all text-neutral-300 underline hover:text-neutral-100" href={urls.observer} target="_blank" rel="noreferrer">
+                Observer: {urls.observer}
               </a>
               <div className="rounded-md border border-neutral-800 bg-neutral-950/40 p-2 text-neutral-400">
                 Tips: Adminで <span className="font-mono text-neutral-200">?dev=1</span> を付けると DevTools が表示されます。

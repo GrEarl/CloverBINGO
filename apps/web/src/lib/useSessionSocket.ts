@@ -48,6 +48,56 @@ export type SpotlightSnapshot = {
   players: SpotlightPlayerSummary[];
 };
 
+export type PendingPreview = {
+  newBingoIds: string[];
+  newBingoNames: string[];
+};
+
+export type AudioStatus = {
+  bgm: {
+    label: string | null;
+    state: "playing" | "paused" | "stopped";
+    updatedAt: number | null;
+  };
+  sfx: {
+    label: string | null;
+    at: number | null;
+  };
+};
+
+export type ObserverEvent = {
+  id: number;
+  at: number;
+  type: string;
+  role?: "participant" | "display" | "admin" | "mod" | "observer";
+  by?: string | null;
+  detail?: string | null;
+};
+
+export type ObserverError = {
+  id: number;
+  at: number;
+  scope: string;
+  message: string;
+  detail?: string | null;
+};
+
+export type ConnectionInfo = {
+  id: string;
+  role: "participant" | "display" | "admin" | "mod" | "observer";
+  screen?: DisplayScreen;
+  playerId?: string;
+  connectedAt: number;
+};
+
+export type LastCommitSummary = {
+  seq: number;
+  number: number;
+  committedAt: string;
+  openedPlayers: number;
+  newBingoNames: string[];
+};
+
 export type ParticipantSnapshot = {
   type: "snapshot";
   ok: true;
@@ -136,11 +186,46 @@ export type AdminSnapshot = {
   };
 };
 
+export type ObserverSnapshot = {
+  type: "snapshot";
+  ok: true;
+  role: "observer";
+  sessionCode: string;
+  sessionStatus: SessionStatus;
+  endedAt: string | null;
+  updatedAt: number;
+  drawCount: number;
+  drawState: DrawState;
+  lastNumber: number | null;
+  lastNumbers: number[];
+  drawnNumbers: number[];
+  stats: SessionStats;
+  fx?: FxSnapshot;
+  spotlight: SpotlightSnapshot;
+  players: Array<Player & { card: number[][] }>;
+  pendingDraw: null | {
+    preparedAt: number;
+    number: number;
+    impact: { reachPlayers: number; bingoPlayers: number };
+    reel: { ten: ReelStatus; one: ReelStatus };
+    stoppedDigits: { ten: number | null; one: number | null };
+    state?: DrawState;
+    preview?: PendingPreview | null;
+  };
+  eventLog: ObserverEvent[];
+  errorLog: ObserverError[];
+  eventCounts: Record<string, number>;
+  audio: AudioStatus;
+  connections: ConnectionInfo[];
+  lastCommit: LastCommitSummary | null;
+};
+
 export type Snapshot =
   | ParticipantSnapshot
   | DisplaySnapshot
   | ModSnapshot
   | AdminSnapshot
+  | ObserverSnapshot
   | { type: "snapshot"; ok: false; error: string };
 
 export type ServerEvent =
@@ -163,7 +248,8 @@ type SocketParams =
   | { role: "participant"; code: string; playerId?: string }
   | { role: "display"; code: string; screen: DisplayScreen }
   | { role: "admin"; code: string }
-  | { role: "mod"; code: string };
+  | { role: "mod"; code: string }
+  | { role: "observer"; code: string };
 
 function buildWebSocketUrl(params: SocketParams): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";

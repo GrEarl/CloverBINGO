@@ -9,7 +9,7 @@ type InviteInfoResponse =
   | { ok: false; error: string }
   | {
       ok: true;
-      role: "admin" | "mod";
+      role: "admin" | "mod" | "observer";
       label: string | null;
       sessionCode: string;
       sessionStatus: "active" | "ended";
@@ -18,7 +18,7 @@ type InviteInfoResponse =
 
 type InviteEnterResponse =
   | { ok: false; error?: string }
-  | { ok: true; role: "admin" | "mod"; sessionCode: string; redirectTo: string };
+  | { ok: true; role: "admin" | "mod" | "observer"; sessionCode: string; redirectTo: string };
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -70,7 +70,7 @@ export default function InvitePage() {
 
   const title = useMemo(() => {
     if (!info || info.ok !== true) return "招待";
-    const roleLabel = info.role === "admin" ? "Admin" : "Mod";
+    const roleLabel = info.role === "admin" ? "Admin" : info.role === "mod" ? "Mod" : "Observer";
     return `${roleLabel} 招待`;
   }, [info]);
 

@@ -11,14 +11,17 @@ type DevCreateSessionResponse =
       sessionCode: string;
       adminToken: string;
       modToken: string;
+      observerToken: string;
       urls: {
         join: string;
         displayTen: string;
         displayOne: string;
         adminInvite: string;
         modInvite: string;
+        observerInvite: string;
         admin: string;
         mod: string;
+        observer: string;
         compatAdmin?: string;
         compatMod?: string;
       };
@@ -40,8 +43,10 @@ export default function HomePage() {
       displayOne: abs(session.urls.displayOne),
       adminInvite: abs(session.urls.adminInvite),
       modInvite: abs(session.urls.modInvite),
+      observerInvite: abs(session.urls.observerInvite),
       admin: abs(session.urls.admin),
       mod: abs(session.urls.mod),
+      observer: abs(session.urls.observer),
       compatAdmin: session.urls.compatAdmin ? abs(session.urls.compatAdmin) : null,
       compatMod: session.urls.compatMod ? abs(session.urls.compatMod) : null,
     };
@@ -109,6 +114,7 @@ export default function HomePage() {
                   { key: "displayOne", label: "会場表示（一の位）", href: links.displayOne, newTab: true },
                   { key: "adminInvite", label: "Admin招待", href: links.adminInvite, newTab: true },
                   { key: "modInvite", label: "Mod招待", href: links.modInvite, newTab: true },
+                  { key: "observerInvite", label: "Observer招待", href: links.observerInvite, newTab: true },
                 ] as const
               ).map((row) => (
                 <div key={row.key} className="flex items-stretch gap-2">
@@ -141,6 +147,9 @@ export default function HomePage() {
                   </a>
                   <a className="break-all text-neutral-300 underline hover:text-neutral-100" href={links.mod} target="_blank" rel="noreferrer">
                     Mod: {links.mod}
+                  </a>
+                  <a className="break-all text-neutral-300 underline hover:text-neutral-100" href={links.observer} target="_blank" rel="noreferrer">
+                    Observer: {links.observer}
                   </a>
                   {links.compatAdmin && (
                     <a className="break-all text-neutral-400 underline hover:text-neutral-200" href={links.compatAdmin} target="_blank" rel="noreferrer">

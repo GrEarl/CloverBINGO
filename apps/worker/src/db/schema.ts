@@ -19,7 +19,7 @@ export const invites = sqliteTable(
   {
     token: text("token").primaryKey(),
     sessionId: text("session_id").notNull(),
-    role: text("role").notNull(), // admin | mod
+    role: text("role").notNull(), // admin | mod | observer
     createdAt: text("created_at").notNull(),
     label: text("label"),
   },

@@ -6,8 +6,10 @@ import DisplayPage from "./routes/DisplayPage";
 import HomePage from "./routes/HomePage";
 import InvitePage from "./routes/InvitePage";
 import ModPage from "./routes/ModPage";
+import ObserverPage from "./routes/ObserverPage";
 import ParticipantPage from "./routes/ParticipantPage";
 import ShowcasePage from "./routes/ShowcasePage";
+import DebugPage from "./routes/DebugPage";
 
 export default function App() {
   return (
@@ -20,6 +22,8 @@ export default function App() {
       <Route path="/s/:code/dev" element={<DevDeckPage />} />
       <Route path="/s/:code/admin" element={<AdminPage />} />
       <Route path="/s/:code/mod" element={<ModPage />} />
+      <Route path="/s/:code/observer" element={<ObserverPage />} />
+      <Route path="/s/:code/debug" element={<DebugPage />} />
       {/* compat */}
       <Route path="/admin/:code" element={<AdminPage />} />
       <Route path="/mod/:code" element={<ModPage />} />

@@ -32,6 +32,17 @@ const BGM_TRIM: Record<BgmTrackFile, { endSec: number }> = {
   "OstReleaseTrailer.ogg": { endSec: 74.309206 },
 };
 
+const SFX_LABELS: Record<keyof AudioRig["sfx"], string> = {
+  coinDeposit: "コイン",
+  startupJingle: "スタート",
+  fanfare: "ファンファーレ",
+  scored: "停止",
+  scoredWithJackpot: "停止(JACKPOT)",
+  spinWin: "解放",
+  jackpot: "ビンゴ",
+  longStreakEnd: "フィニッシュ",
+};
+
 type AudioRig = {
   bgm: HTMLAudioElement;
   bgmPlaylist: readonly BgmTrackFile[];
@@ -72,6 +83,10 @@ type ReachIntensity = 0 | 1 | 2 | 3;
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return Math.min(1, Math.max(0, n));
+}
+
+function bgmLabel(file: BgmTrackFile): string {
+  return BGM_TRACKS.find((t) => t.file === file)?.label ?? file;
 }
 
 function reachIntensityFromCount(reachCount: number | null | undefined): ReachIntensity {
@@ -201,6 +216,10 @@ export default function AdminPage() {
   const viewRef = useRef<AdminSnapshot | null>(null);
   useEffect(() => {
     viewRef.current = view;
+  }, [view]);
+  const canSendAudioRef = useRef(false);
+  useEffect(() => {
+    canSendAudioRef.current = Boolean(view);
   }, [view]);
 
   const [error, setError] = useState<string | null>(null);
@@ -416,11 +435,19 @@ export default function AdminPage() {
     syncBgmVolume(aud);
   }
 
+  function sendAudioUpdate(payload: { bgm?: { label: string | null; state: "playing" | "paused" | "stopped" }; sfx?: { label: string | null } }) {
+    if (!canSendAudioRef.current) return;
+    void postJson(`/api/admin/audio?code=${encodeURIComponent(code)}`, payload).catch(() => {
+      // ignore
+    });
+  }
+
   function playOneShot(aud: AudioRig, key: keyof AudioRig["sfx"]) {
     const src = aud.sfx[key];
     const clip = src.cloneNode(true) as HTMLAudioElement;
     clip.volume = src.volume;
 
+    sendAudioUpdate({ sfx: { label: SFX_LABELS[key] ?? key } });
     duckStart(aud);
     let done = false;
     const finish = () => {
@@ -460,6 +487,7 @@ export default function AdminPage() {
     if (aud.fanfareActive) return;
     aud.fanfareActive = true;
     duckStart(aud);
+    sendAudioUpdate({ sfx: { label: SFX_LABELS.fanfare } });
     try {
       aud.sfx.fanfare.currentTime = 0;
       void aud.sfx.fanfare.play();
@@ -501,6 +529,13 @@ export default function AdminPage() {
     syncBgmVolume(aud);
     syncSfxVolume(aud, sfxVolumeValue);
   }, [audioEnabled, bgmVolumeValue, sfxVolumeValue]);
+
+  useEffect(() => {
+    if (!view || !audioEnabled) return;
+    const aud = audioRef.current;
+    if (!aud) return;
+    sendAudioUpdate({ bgm: { label: bgmLabel(aud.bgmPlaylist[aud.bgmIndex]), state: "playing" } });
+  }, [view, audioEnabled]);
 
   useEffect(() => {
     if (!audioEnabled) return;
@@ -608,6 +643,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     return () => {
+      sendAudioUpdate({ bgm: { label: null, state: "stopped" } });
       if (bingoTimerRef.current) window.clearTimeout(bingoTimerRef.current);
       const aud = audioRef.current;
       if (!aud) return;
@@ -667,6 +703,7 @@ export default function AdminPage() {
         void rig.bgm.play().catch(() => {
           // ignore
         });
+        sendAudioUpdate({ bgm: { label: bgmLabel(rig.bgmPlaylist[rig.bgmIndex]), state: "playing" } });
         scheduleBgmTrim(rig);
       };
       rig.bgm.addEventListener("ended", rig.bgmOnEnded);
@@ -678,11 +715,13 @@ export default function AdminPage() {
       // Unlock audio on user gesture
       syncBgmVolume(rig);
       await rig.bgm.play();
+      sendAudioUpdate({ bgm: { label: bgmLabel(rig.bgmPlaylist[rig.bgmIndex]), state: "playing" } });
       scheduleBgmTrim(rig);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to enable audio");
       setAudioEnabled(false);
       audioRef.current = null;
+      sendAudioUpdate({ bgm: { label: null, state: "stopped" } });
     }
   }
 

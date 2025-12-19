@@ -12,7 +12,7 @@ function origin() {
   return process.env.CLOVERBINGO_ORIGIN || "http://localhost:5173";
 }
 
-function buildUrls(code, adminToken, modToken) {
+function buildUrls(code, adminToken, modToken, observerToken) {
   const base = origin();
   return {
     join: new URL(`/s/${code}`, base).toString(),
@@ -20,8 +20,10 @@ function buildUrls(code, adminToken, modToken) {
     displayOne: new URL(`/s/${code}/display/one`, base).toString(),
     adminInvite: new URL(`/i/${adminToken}`, base).toString(),
     modInvite: new URL(`/i/${modToken}`, base).toString(),
+    observerInvite: new URL(`/i/${observerToken}`, base).toString(),
     admin: new URL(`/s/${code}/admin?token=${adminToken}`, base).toString(),
     mod: new URL(`/s/${code}/mod?token=${modToken}`, base).toString(),
+    observer: new URL(`/s/${code}/observer?token=${observerToken}`, base).toString(),
     compatAdmin: new URL(`/admin/${code}?token=${adminToken}`, base).toString(),
     compatMod: new URL(`/mod/${code}?token=${modToken}`, base).toString(),
   };
@@ -44,19 +46,21 @@ function tryCreateOnce(mode) {
   const code = crypto.randomUUID().slice(0, 6).toUpperCase();
   const adminToken = crypto.randomUUID();
   const modToken = crypto.randomUUID();
+  const observerToken = crypto.randomUUID();
   const createdAt = new Date().toISOString();
 
   const sql = [
     `INSERT INTO sessions (id, code, status, created_at, ended_at) VALUES ('${sessionId}', '${code}', 'active', '${createdAt}', NULL)`,
     `INSERT INTO invites (token, session_id, role, created_at, label) VALUES ('${adminToken}', '${sessionId}', 'admin', '${createdAt}', 'admin')`,
     `INSERT INTO invites (token, session_id, role, created_at, label) VALUES ('${modToken}', '${sessionId}', 'mod', '${createdAt}', 'mod')`,
+    `INSERT INTO invites (token, session_id, role, created_at, label) VALUES ('${observerToken}', '${sessionId}', 'observer', '${createdAt}', 'observer')`,
   ].join(";\n");
 
   const baseArgs = ["d1", "execute", "DB", "--command", sql, "--yes"];
   const modeArgs = mode === "remote" ? ["--remote"] : ["--local", "--persist-to", ".wrangler/state"];
   runWrangler([...baseArgs, ...modeArgs]);
 
-  return { sessionId, code, adminToken, modToken, createdAt };
+  return { sessionId, code, adminToken, modToken, observerToken, createdAt };
 }
 
 function main() {
@@ -67,7 +71,7 @@ function main() {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
       const created = tryCreateOnce(mode);
-      const urls = buildUrls(created.code, created.adminToken, created.modToken);
+      const urls = buildUrls(created.code, created.adminToken, created.modToken, created.observerToken);
       process.stdout.write(
         [
           `ok: true`,
@@ -79,9 +83,12 @@ function main() {
           `displayOne:  ${urls.displayOne}`,
           `adminInvite: ${urls.adminInvite}`,
           `modInvite:   ${urls.modInvite}`,
+          `observerInvite: ${urls.observerInvite}`,
           ``,
           `(compat) admin: ${urls.compatAdmin}`,
           `(compat) mod:   ${urls.compatMod}`,
+          ``,
+          `observer: ${urls.observer}`,
           ``,
         ].join("\n"),
       );

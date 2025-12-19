@@ -18,7 +18,7 @@
 
 4) ブラウザで `http://localhost:5173/` を開き、「Dev: セッション作成」を押す
 
-- 参加者/会場表示/Admin/Mod のリンクが表示されます
+- 参加者/会場表示/Admin/Mod/Observer のリンクが表示されます
 - Dev セッション作成はローカル限定です（`/api/dev/create-session`）
 
 ## 2. デプロイ（Cloudflare）
@@ -85,6 +85,7 @@
 - 会場表示（十の位 / 一の位）
 - Admin 招待 URL（`/i/:token`）
 - Mod 招待 URL（`/i/:token`）
+- Observer 招待 URL（`/i/:token`）
 
 ## 4. 当日運用マニュアル
 
@@ -95,6 +96,8 @@
 - 会場表示（右・一の位）: `/s/:code/display/one`
 - Admin: `/s/:code/admin`
 - Mod: `/s/:code/mod`
+- Observer: `/s/:code/observer`
+- Debug: `/s/:code/debug`
 
 ### 4.2 会場表示（ten / one）
 
@@ -141,4 +144,3 @@
 - 音が出ない: Admin 画面で「音を有効化」を必ず押す
 - 画面が固まる/点滅が辛い: `?safe=1` または `?fx=0` を付ける
 - 再接続が続く: 回線が不安定な可能性。数秒で自動復帰します
-
