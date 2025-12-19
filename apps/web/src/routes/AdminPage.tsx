@@ -391,22 +391,27 @@ export default function AdminPage() {
       const key = e.key.toLowerCase();
       if (key === "p") {
         if (current.drawState === "spinning") {
+          sendKeyLog({ key, action: "prepare", allowed: false, reason: "spinning" });
           setError("回転中は Prepare できません。停止するまで待ってください。");
           return;
         }
+        sendKeyLog({ key, action: "prepare", allowed: true });
         void prepare().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
         return;
       }
       if (key === "w" || key === "a" || key === "s" || key === "d") {
         const pending = current.pendingDraw;
         if (!pending) {
+          sendKeyLog({ key, action: "go", allowed: false, reason: "no-pending" });
           setError("先に P / Prepare を押してください。");
           return;
         }
         if (pending.state !== "prepared" || pending.reel.ten !== "idle" || pending.reel.one !== "idle") {
+          sendKeyLog({ key, action: "go", allowed: false, reason: "not-ready" });
           setError("抽選中のため GO できません。");
           return;
         }
+        sendKeyLog({ key, action: "go", allowed: true });
         void go().catch((err) => setError(err instanceof Error ? err.message : "unknown error"));
       }
     }
@@ -438,6 +443,12 @@ export default function AdminPage() {
   function sendAudioUpdate(payload: { bgm?: { label: string | null; state: "playing" | "paused" | "stopped" }; sfx?: { label: string | null } }) {
     if (!canSendAudioRef.current) return;
     void postJson(`/api/admin/audio?code=${encodeURIComponent(code)}`, payload).catch(() => {
+      // ignore
+    });
+  }
+
+  function sendKeyLog(payload: { key: string; action?: "prepare" | "go"; allowed?: boolean; reason?: string | null }) {
+    void postJson(`/api/admin/key?code=${encodeURIComponent(code)}`, payload).catch(() => {
       // ignore
     });
   }

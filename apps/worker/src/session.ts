@@ -265,6 +265,22 @@ function clampAudioLabel(input: unknown): string | null {
   return trimmed;
 }
 
+function clampLogToken(input: unknown, maxLen: number): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (trimmed.length < 1) return null;
+  if (trimmed.length > maxLen) return trimmed.slice(0, maxLen);
+  return trimmed;
+}
+
+function clampKeyInput(input: unknown): string | null {
+  return clampLogToken(input, 12);
+}
+
+function clampLogDetail(input: unknown): string | null {
+  return clampLogToken(input, 80);
+}
+
 function sanitizeSpotlightIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((v) => typeof v === "string").slice(0, 6);
@@ -741,6 +757,8 @@ export class SessionDurableObject {
 
   private broadcastEvent(filter: (a: WsAttachment | null) => boolean, payload: unknown): void {
     const msg = JSON.stringify(payload);
+    const roleCounts: Partial<Record<Role, number>> = {};
+    let total = 0;
     for (const ws of this.state.getWebSockets()) {
       const attachment = getAttachmentFromWebSocket(ws);
       if (!filter(attachment)) continue;
@@ -749,6 +767,18 @@ export class SessionDurableObject {
       } catch {
         // ignore
       }
+      total += 1;
+      if (attachment?.role) roleCounts[attachment.role] = (roleCounts[attachment.role] ?? 0) + 1;
+    }
+
+    const payloadType = (payload as { type?: unknown } | null)?.type;
+    if (typeof payloadType === "string") {
+      const roleDetail = Object.entries(roleCounts)
+        .map(([role, count]) => `${role}=${count}`)
+        .join(" ");
+      const detailParts = [`type=${payloadType}`, `targets=${total}`];
+      if (roleDetail) detailParts.push(roleDetail);
+      this.pushEvent({ type: "event.emit", detail: detailParts.join(" ") });
     }
   }
 
@@ -1353,13 +1383,16 @@ export class SessionDurableObject {
       const stateRaw = (bgm as { state?: unknown }).state;
       const state = stateRaw === "playing" || stateRaw === "paused" || stateRaw === "stopped" ? stateRaw : null;
       if (state) {
-        this.audioStatus.bgm = {
-          label: label ?? null,
-          state,
-          updatedAt: nowMs(),
-        };
-        this.pushEvent({ type: "audio.bgm", role: "admin", detail: label ? `${state} ${label}` : state });
-        touched = true;
+        const nextLabel = label ?? null;
+        if (this.audioStatus.bgm.state !== state || this.audioStatus.bgm.label !== nextLabel) {
+          this.audioStatus.bgm = {
+            label: nextLabel,
+            state,
+            updatedAt: nowMs(),
+          };
+          this.pushEvent({ type: "audio.bgm", role: "admin", detail: label ? `${state} ${label}` : state });
+          touched = true;
+        }
       }
     }
 
@@ -1371,7 +1404,6 @@ export class SessionDurableObject {
           label,
           at: nowMs(),
         };
-        this.pushEvent({ type: "audio.sfx", role: "admin", detail: label });
         touched = true;
       }
     }
@@ -1382,6 +1414,38 @@ export class SessionDurableObject {
     }
 
     return jsonResponse({ ok: true, audio: this.audioStatus });
+  }
+
+  private async handleAdminKey(request: Request): Promise<Response> {
+    const loadError = await this.ensureLoaded(request);
+    if (loadError) return loadError;
+    const authError = await this.assertInvite(request, "admin");
+    if (authError) return authError;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return textResponse("invalid json", { status: 400 });
+    }
+
+    const key = clampKeyInput((body as { key?: unknown }).key);
+    if (!key) return textResponse("key required", { status: 400 });
+
+    const actionRaw = (body as { action?: unknown }).action;
+    const action = actionRaw === "prepare" || actionRaw === "go" ? actionRaw : null;
+    const allowedRaw = (body as { allowed?: unknown }).allowed;
+    const allowed = typeof allowedRaw === "boolean" ? allowedRaw : null;
+    const reason = clampLogDetail((body as { reason?: unknown }).reason);
+
+    const detailParts = [`key=${key}`];
+    if (action) detailParts.push(`action=${action}`);
+    if (allowed !== null) detailParts.push(`allowed=${allowed ? "1" : "0"}`);
+    if (reason) detailParts.push(`reason=${reason}`);
+    this.pushEvent({ type: "admin.key", role: "admin", detail: detailParts.join(" ") });
+    this.touch();
+    this.broadcastSnapshots();
+    return jsonResponse({ ok: true });
   }
 
   private async handleAdminEnd(request: Request): Promise<Response> {
@@ -1612,6 +1676,7 @@ export class SessionDurableObject {
     if (url.pathname === "/admin/dev/reset" && request.method === "POST") return this.handleAdminDevReset(request);
     if (url.pathname === "/admin/reel" && request.method === "POST") return this.handleAdminReel(request);
     if (url.pathname === "/admin/audio" && request.method === "POST") return this.handleAdminAudio(request);
+    if (url.pathname === "/admin/key" && request.method === "POST") return this.handleAdminKey(request);
     if (url.pathname === "/admin/end" && request.method === "POST") return this.handleAdminEnd(request);
     if (url.pathname === "/mod/participant/status" && request.method === "POST") return this.handleModParticipantStatus(request);
     if (url.pathname === "/mod/spotlight" && request.method === "POST") return this.handleModSpotlight(request);

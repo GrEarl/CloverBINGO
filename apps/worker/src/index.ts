@@ -222,6 +222,14 @@ app.post("/api/admin/audio", async (c) => {
   return forwardToSession(c, session, "/admin/audio");
 });
 
+app.post("/api/admin/key", async (c) => {
+  const code = c.req.query("code");
+  if (!code) return c.text("missing code", 400);
+  const session = await resolveSessionByCode(c.env, code);
+  if (!session) return c.text("session not found", 404);
+  return forwardToSession(c, session, "/admin/key");
+});
+
 app.post("/api/admin/end", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.text("missing code", 400);

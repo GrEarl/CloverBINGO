@@ -6,7 +6,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 ## Purpose / Big Picture
 
-現地スタッフが操作せずに監視できる「オブザーバー画面」を追加し、イベント進行中の状態（参加者カードの全体タイル表示、Admin/Mod操作の監視、リーチ/ビンゴ人数、prepare後/リール中の次番号と影響、BGM/SE名、接続端末、通信状況、内部イベント/エラー）を1画面で把握できるようにします。技術情報が多くなりすぎる場合は「デバッグ画面」として分離し、オブザーバー画面からリンクで参照できるようにします。認証は Admin/Mod と同等の招待URL方式で保護し、スタッフのみが閲覧できることを担保します。
+現地スタッフが操作せずに監視できる「オブザーバー画面」を追加し、イベント進行中の状態（Admin/Mod操作の監視、リーチ/ビンゴ人数、prepare後/リール中の次番号と影響、BGM/SE名、接続端末、通信状況、内部イベント/エラー）を1画面で把握できるようにします。オブザーバー画面は上下に分割したレイアウトに整理し、参加者カードのタイル表示は別画面（カード順表示専用画面）へ分離します。技術情報が多くなりすぎる場合は「デバッグ画面」として分離し、オブザーバー画面からリンクで参照できるようにします。操作ログは音響イベントで埋まらないよう抑制し、キー入力とイベント発布（WS配信）が確実に記録されるようにします。認証は Admin/Mod と同等の招待URL方式で保護し、スタッフのみが閲覧できることを担保します。
 
 ## Progress
 
@@ -15,6 +15,9 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 - [x] (2025-12-19) Web に Observer/Debug 画面を追加し、カードタイル自動ページングと監視情報表示を実装する。
 - [x] (2025-12-19) 招待/作成スクリプト/ホーム画面を更新して observer 招待URLと導線を追加する。
 - [x] (2025-12-19) 検証（型チェック/ビルド/単体テスト）を実施し、受け入れ確認を行う。
+- [x] (2025-12-19) オブザーバー画面を上下分割レイアウトへ再構成し、カード順表示は別画面へ分離する。
+- [x] (2025-12-19) 操作ログの音響スパムを抑制し、キー入力とイベント発布ログを追加する。
+- [x] (2025-12-19) 変更後のUI/ログが意図通り表示されることを検証し、必要ならドキュメントを更新する。
 
 ## Surprises & Discoveries
 
@@ -32,10 +35,17 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 - Decision: 音響の「現在再生中」表示は Admin 画面から DO に通知して共有する（DOで揮発状態を保持）。
   Rationale: 音は Admin ブラウザでのみ再生されるため、サーバ側に状態がない。最小の変更でスタッフ監視に反映するには Admin→DO の通知が適切。
   Date/Author: 2025-12-19 / codex
+- Decision: オブザーバー画面は上下分割構成とし、カードの順表示は別画面に切り出す。
+  Rationale: 1画面の情報量が多く、カードの可読性と運営監視の即時性が両立しづらい。役割を分けた方が運用しやすい。
+  Date/Author: 2025-12-19 / codex
+- Decision: 操作ログは音響イベントの連打で埋まらないように抑制し、キー入力とイベント発布は必ずログに残す。
+  Rationale: 運営が見たいのは操作・配信の可視化であり、SE連打はノイズになるため。
+  Date/Author: 2025-12-19 / codex
 
 ## Outcomes & Retrospective
 
 - (2025-12-19) Observer/Debug 画面と監視ログ・接続情報・音響ステータスを実装し、テスト/ビルドが通ることを確認した。運用導線（招待URL/ホーム/HowToUse）の追記まで完了。
+- (2025-12-19) Observer画面を上下分割に再構成し、カード順表示を別画面へ切り出した。操作ログから音響スパムを抑制し、キー入力とイベント発布がログに残るようにした。
 
 ## Context and Orientation
 
@@ -59,7 +69,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 まず Worker/DO を拡張して observer ロールと監視情報を配信できるようにします。`SessionDurableObject` に observer を追加し、WSの認証に observer cookie を使うようにします。合わせて、イベントログ/エラーログ/接続端末一覧/音響ステータスを DO の揮発状態として保持し、observer 用スナップショットで配信します。抽選の prepare 状態（pendingDraw）については observer には次番号と影響（reach/bingo増分）を表示できるようにし、Admin/Mod/Participant/Display には漏れないようにします。
 
-次に Web 側に Observer/Debug 画面を追加します。Observer 画面では、全参加者のカードをタイル表示し、溢れる場合は一定間隔でページ切替を行います。画面上部にセッション状態、リーチ/ビンゴ人数、drawState、prepare情報、直近確定番号/新規BINGO名、音響状態を表示します。Debug 画面では、イベントログ、エラーログ、接続端末一覧、イベント送信カウント、スナップショットJSONなどの技術情報を確認できるようにします。
+次に Web 側の Observer/Debug 画面を調整します。Observer 画面は上下に分割し、上段にセッション状態/統計/準備情報/直近確定/音響/接続の概要、下段に操作監視ログとリンク（Debug/カード順表示）を配置します。参加者カードのタイル表示と自動ページングは別画面（カード順表示専用）に移し、カードだけを集中して確認できるようにします。Debug 画面では、イベントログ、エラーログ、接続端末一覧、イベント送信カウントなどの技術情報を確認できるようにします。
 
 最後に招待URLの生成・案内を更新します。`create-session.mjs` と `/api/dev/create-session` で observer トークンを生成して表示し、Home/Invite 画面でも observer を選択できるようにします。必要に応じて `HowToUse.md` など運用ドキュメントに observer 画面の導線を追記します。
 
@@ -67,19 +77,20 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 1) ExecPlan を遵守しつつ Worker/DO を編集する（リポジトリ直下）。
 
-    - `apps/worker/src/session.ts`: observer ロール追加、WS認証、observer スナップショット、監視ログ・音響ステータス・接続一覧の追加。
-    - `apps/worker/src/index.ts`: `/api/invite/enter` の observer 対応、`/api/admin/audio` の追加、`/api/dev/create-session` の observer トークン生成。
+    - `apps/worker/src/session.ts`: observer ロール追加、WS認証、observer スナップショット、監視ログ・音響ステータス・接続一覧の追加。操作ログの音響スパム抑制とキー入力/イベント発布ログを追加する。
+    - `apps/worker/src/index.ts`: `/api/invite/enter` の observer 対応、`/api/admin/audio` の追加、`/api/admin/key` の追加、`/api/dev/create-session` の observer トークン生成。
     - `apps/worker/scripts/create-session.mjs`: observer トークンと URL の出力追加。
 
 2) Web を編集して画面を追加する（リポジトリ直下）。
 
     - `apps/web/src/lib/useSessionSocket.ts`: observer スナップショット型と role の追加。
-    - `apps/web/src/routes/ObserverPage.tsx`: 監視画面の新規実装。
+    - `apps/web/src/routes/ObserverPage.tsx`: 上下分割の監視画面に再構成（カード表示は除去）。
+    - `apps/web/src/routes/ObserverCardsPage.tsx`: 参加者カードの順表示専用画面を追加。
     - `apps/web/src/routes/DebugPage.tsx`: デバッグ画面の新規実装（必要に応じて）。
     - `apps/web/src/App.tsx`: 新しいルート追加。
     - `apps/web/src/routes/InvitePage.tsx`: observer 招待対応。
     - `apps/web/src/routes/HomePage.tsx`: observer 招待リンク表示。
-    - `apps/web/src/routes/AdminPage.tsx`: 音響ステータス通知（BGM/SFX名）を DO に送信。
+    - `apps/web/src/routes/AdminPage.tsx`: 音響ステータス通知（BGM/SFX名）を DO に送信。キー入力ログの送信も追加。
 
 3) 変更後の検証を行う（リポジトリ直下）。
 
@@ -91,7 +102,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 - `observer` 招待URLで入室すると `/s/:code/observer` に遷移し、WSが接続される。
 - Observer 画面で以下が確認できる。
-  - 参加者カードがタイル表示され、人数が多い場合は一定間隔でページ切替される。
+  - 参加者カードのタイル表示は別画面（カード順表示）で確認できる。
   - リーチ人数/ビンゴ人数、drawState、直近確定番号、lastNumbers が表示される。
   - prepare 後は次番号と impact（reach/bingo増分）が表示され、リール中でも確認できる。
   - 直近の新規BINGO名が確認できる。
@@ -101,6 +112,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
   - エラーログ（commit失敗など）が表示される。
   - 接続端末一覧とロール別接続数が確認できる。
 - Admin/Mod/Participant/Display には prepare の番号が漏れないこと（observerのみ）。
+- 操作ログにキー入力とイベント発布ログが含まれ、音響イベントが大量に占有しないこと。
 
 ## Idempotence and Recovery
 
@@ -111,6 +123,7 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 ## Artifacts and Notes
 
 - 2025-12-19: `npm test` / `npx tsc -p apps/web/tsconfig.json --noEmit` / `npm -w apps/web run build` がすべて成功。
+- 2025-12-19: `npx tsc -p apps/web/tsconfig.json --noEmit` と `npm -w apps/web run build` を再実行し成功。
 
 ## Interfaces and Dependencies
 
@@ -118,6 +131,8 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 - 新WS: `GET /api/ws?code=<sessionCode>&role=observer`（cookieで認証）。
 - 新HTTP: `POST /api/admin/audio?code=<sessionCode>`（Adminのみ）。
   - body: `{ bgm?: { label: string | null; state: "playing" | "paused" | "stopped" }, sfx?: { label: string | null } }`
+- 新HTTP: `POST /api/admin/key?code=<sessionCode>`（Adminのみ）。
+  - body: `{ key: string, action?: "prepare" | "go", allowed?: boolean, reason?: string | null }`
 - observer スナップショットに含める情報（最低限）:
   - `players`（カード含む）、`drawnNumbers`、`pendingDraw`（次番号/impact）、`eventLog`、`errorLog`、`audioStatus`、`connections`、`eventCounts`。
 
@@ -125,3 +140,5 @@ This ExecPlan is a living document. The sections `Progress`, `Surprises & Discov
 
 - 2025-12-19: 初版作成（observer/debug の計画と認証方式を決定）。
 - 2025-12-19: 実装完了に伴い Progress/Surprises/Outcomes を更新し、検証結果を反映。
+- 2025-12-19: Observer画面の上下分割・カード専用画面化・操作ログ改善に合わせて計画を更新（UI/ログ/新エンドポイントの追加）。
+- 2025-12-19: 追加変更（上下分割/カード別画面/ログ改善）の実装結果を反映し、進捗と検証情報を更新。
