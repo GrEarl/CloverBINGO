@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useParams, useSearchParams } from "react-router-dom";
 
 import BingoCard from "../components/BingoCard";
+import ParticleSystem from "../components/ParticleSystem";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import WsStatusPill from "../components/ui/WsStatusPill";
@@ -10,6 +11,15 @@ import { useSessionSocket, type DisplayScreen, type DisplaySnapshot } from "../l
 
 type ReachIntensity = 0 | 1 | 2 | 3;
 type ReelDigit = "ten" | "one";
+type ParticleMode = "snow" | "rain" | "confetti" | "sparkles" | "matrix";
+
+type ParticleBurst = {
+  key: number;
+  mode: ParticleMode;
+  count?: number;
+  intensity?: number;
+  origin?: { x: number; y: number };
+};
 
 type DrawSpinEvent = {
   type: "draw.spin";
@@ -188,6 +198,8 @@ export default function DisplayPage() {
 
   const [bingoFx, setBingoFx] = useState<{ key: number; count: number } | null>(null);
   const bingoFxTimerRef = useRef<number | null>(null);
+  const [particleBurst, setParticleBurst] = useState<ParticleBurst | null>(null);
+  const particleBurstSeqRef = useRef(0);
   const [bingoAnnounce, setBingoAnnounce] = useState<BingoAnnounceState | null>(null);
   const bingoAnnounceSeqRef = useRef(0);
   const bingoAnnounceNameTimerRef = useRef<number | null>(null);
@@ -242,6 +254,22 @@ export default function DisplayPage() {
     setShake(intensity);
     if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     shakeTimerRef.current = window.setTimeout(() => setShake("none"), intensity === "violent" ? 600 : intensity === "medium" ? 400 : 200);
+  };
+
+  const triggerParticleBurst = (mode: ParticleMode, boost = 0): void => {
+    if (safeMode || !fxActive) return;
+    const baseIntensity = visualReachIntensity >= 3 ? 1.1 : visualReachIntensity >= 2 ? 0.95 : 0.8;
+    const intensity = Math.max(0.4, baseIntensity + boost);
+    const baseCount = visualReachIntensity >= 3 ? 72 : visualReachIntensity >= 2 ? 54 : 36;
+    particleBurstSeqRef.current += 1;
+    const originX = screenDigit === "ten" ? 0.46 : 0.54;
+    setParticleBurst({
+      key: particleBurstSeqRef.current,
+      mode,
+      intensity,
+      count: Math.floor(baseCount * intensity),
+      origin: { x: originX, y: 0.5 },
+    });
   };
 
   const bingoParticles = useMemo(() => {
@@ -318,6 +346,7 @@ export default function DisplayPage() {
           
           const startShake = visualReachIntensity >= 3 ? "violent" : visualReachIntensity >= 2 ? "medium" : "small";
           triggerShake(startShake);
+          triggerParticleBurst("sparkles", 0.1);
         }
       }
 
@@ -359,6 +388,13 @@ export default function DisplayPage() {
       const newBingoNames = Array.isArray(lastEvent.newBingoNames)
         ? lastEvent.newBingoNames.filter((n): n is string => typeof n === "string" && n.trim().length > 0)
         : [];
+      if (fxActive && !safeMode) {
+        if (newBingoNames.length > 0) {
+          triggerParticleBurst("confetti", 0.35);
+        } else {
+          triggerParticleBurst("sparkles", 0.2);
+        }
+      }
       if (newBingoNames.length > 0) {
         const key = Date.now();
         const startedAt = key;
@@ -651,6 +687,38 @@ export default function DisplayPage() {
   const statTwoAway = minMissing?.["2"] ?? 0;
   const statThreePlus = minMissing?.["3plus"] ?? 0;
 
+  // Extra stats calculation
+  const totalPlayers = statBingo + statOneAway + statTwoAway + statThreePlus;
+  const participationRate = totalPlayers > 0 ? Math.round((statBingo / totalPlayers) * 100) : 0;
+  const last5 = drawnNumbers.slice(-5).reverse();
+
+  // Particle Mode Logic
+  let particleMode: ParticleMode = "matrix";
+  let particleIntensity = 0.2;
+  
+  if (bingoFx) {
+    particleMode = "confetti";
+    particleIntensity = 1;
+  } else if (tensionLevel === 3) {
+    particleMode = "rain";
+    particleIntensity = 0.8;
+  } else if (tensionLevel === 2) {
+    particleMode = "sparkles";
+    particleIntensity = 0.6;
+  } else if (drawSpinning) {
+     particleMode = "matrix";
+     particleIntensity = 0.4;
+  } else {
+    // Idle or calm
+    particleMode = "matrix"; // falling chars
+    particleIntensity = 0.15;
+  }
+
+  const pulseBoost = fxActive && !safeMode
+    ? (goPulse ? 0.12 : 0) + (confirmedPulse ? 0.18 : 0) + (bingoFx ? 0.35 : 0)
+    : 0;
+  particleIntensity = Math.min(1.4, Math.max(0.05, particleIntensity + pulseBoost));
+
   const renderStatsCard = (key: string) => (
     <div
       key={key}
@@ -701,6 +769,20 @@ export default function DisplayPage() {
         <div className="tracking-[0.18em]">3+ AWAY</div>
         <div className="font-mono text-[min(4.2vw,3.2rem)] font-black tabular-nums text-pit-text-main">{statThreePlus}</div>
       </div>
+      
+       {/* New Stats Row: History & Total */}
+      <div className="mt-4 border-t border-pit-border/60 pt-3">
+         <div className="flex justify-between items-end mb-2">
+            <div className="text-[0.65rem] text-pit-text-dim tracking-[0.18em]">LAST 5 DRAWN</div>
+            <div className="text-[0.65rem] text-pit-text-dim tracking-[0.18em]">TOTAL: {totalPlayers}</div>
+         </div>
+         <div className="flex justify-between items-center bg-black/30 p-2 border border-pit-border/30">
+            {last5.length > 0 ? last5.map((n, i) => (
+               <div key={i} className={cn("font-mono font-black text-xl tabular-nums", i === 0 ? "text-pit-primary scale-110" : "text-pit-text-muted")}>{n}</div>
+            )) : <div className="text-xs text-pit-text-dim w-full text-center">WAITING FOR DRAW...</div>}
+         </div>
+      </div>
+
     </div>
   );
 
@@ -781,6 +863,17 @@ export default function DisplayPage() {
 
       {/* Juice Container */}
       <div className={cn("relative z-10 size-full transition-transform", shakeClass)}>
+      
+      {/* Particle System Layer */}
+      {fxActive && !safeMode && (
+          <ParticleSystem 
+            mode={particleMode}
+            active={fxActive && !safeMode}
+            intensity={particleIntensity}
+            burst={particleBurst ?? undefined}
+            className="z-0 fixed inset-0 pointer-events-none mix-blend-screen opacity-70"
+          />
+      )}
 
       {fxActive && (
         <>
@@ -806,6 +899,9 @@ export default function DisplayPage() {
       {(bingoFx || bingoAnnounce) && (
         <>
           {!safeMode && fxActive && fxEnabled && bingoFx && (
+             // Native simple particles on top of canvas if needed, or rely on canvas "confetti" mode.
+             // We can keep these for specific CSS animations if we want, or remove them. 
+             // Let's keep them as a layer on top for now as they are distinct "floaters".
             <div className="pointer-events-none fixed inset-0 z-30">
               {bingoParticles.map((p) => (
                 <span key={p.key} className="clover-particle" style={p.style} />
