@@ -8,13 +8,21 @@ type Props = {
   variant?: "default" | "compact";
   showHeaders?: boolean;
   className?: string;
+  reachHighlights?: boolean[][];
 };
 
 function isFree(cell: number): boolean {
   return cell === 0;
 }
 
-export default function BingoCard({ card, drawnNumbers, variant = "default", showHeaders = true, className }: Props) {
+export default function BingoCard({
+  card,
+  drawnNumbers,
+  variant = "default",
+  showHeaders = true,
+  className,
+  reachHighlights,
+}: Props) {
   const drawn = useMemo(() => new Set(drawnNumbers), [drawnNumbers]);
   const headers = ["B", "I", "N", "G", "O"];
   const isCompact = variant === "compact";
@@ -44,6 +52,7 @@ export default function BingoCard({ card, drawnNumbers, variant = "default", sho
           row.map((cell, cIdx) => {
             const marked = isFree(cell) || drawn.has(cell);
             const label = isFree(cell) ? "FREE" : String(cell);
+            const shouldHighlight = !marked && Boolean(reachHighlights?.[rIdx]?.[cIdx]);
             return (
               <div
                 key={`${rIdx}-${cIdx}`}
@@ -51,6 +60,7 @@ export default function BingoCard({ card, drawnNumbers, variant = "default", sho
                   cn(
                     "aspect-square select-none border text-center font-bold leading-[1] flex items-center justify-center transition-all duration-300",
                     isCompact ? "text-xs" : "text-lg",
+                    shouldHighlight && "reach-cell border-transparent",
                   ),
                   marked
                     ? "border-pit-primary bg-pit-primary text-black shadow-[0_0_10px_rgba(234,179,8,0.4)] scale-100 z-10"

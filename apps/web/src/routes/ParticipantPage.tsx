@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useParams } from "react-router-dom";
 
 import BingoCard from "../components/BingoCard";
@@ -10,6 +10,46 @@ import Input from "../components/ui/Input";
 import WsStatusPill from "../components/ui/WsStatusPill";
 import { useLocalStorageString } from "../lib/useLocalStorage";
 import { useSessionSocket, type ParticipantSnapshot } from "../lib/useSessionSocket";
+
+type CellPos = { r: number; c: number };
+
+function buildReachHighlights(card: number[][], drawnNumbers: number[]): boolean[][] {
+  const size = 5;
+  const drawn = new Set(drawnNumbers);
+  const highlight: boolean[][] = Array.from({ length: size }, () => Array.from({ length: size }, () => false));
+  if (card.length !== size) return highlight;
+
+  const lines: CellPos[][] = [];
+  for (let r = 0; r < size; r += 1) {
+    const row: CellPos[] = [];
+    for (let c = 0; c < size; c += 1) row.push({ r, c });
+    lines.push(row);
+  }
+  for (let c = 0; c < size; c += 1) {
+    const col: CellPos[] = [];
+    for (let r = 0; r < size; r += 1) col.push({ r, c });
+    lines.push(col);
+  }
+  lines.push(
+    Array.from({ length: size }, (_, i) => ({ r: i, c: i })),
+    Array.from({ length: size }, (_, i) => ({ r: i, c: size - 1 - i })),
+  );
+
+  for (const line of lines) {
+    const missing: CellPos[] = [];
+    for (const cell of line) {
+      const value = card[cell.r]?.[cell.c];
+      const marked = value === 0 || drawn.has(value);
+      if (!marked) missing.push(cell);
+    }
+    if (missing.length === 1) {
+      const target = missing[0];
+      highlight[target.r][target.c] = true;
+    }
+  }
+
+  return highlight;
+}
 
 export default function ParticipantPage() {
   const params = useParams();
@@ -42,6 +82,62 @@ export default function ParticipantPage() {
     if ((snapshot as ParticipantSnapshot).role !== "participant") return null;
     return snapshot as ParticipantSnapshot;
   }, [snapshot]);
+
+  const [bingoFx, setBingoFx] = useState<{ key: number } | null>(null);
+  const bingoFxTimerRef = useRef<number | null>(null);
+  const prevIsBingoRef = useRef(false);
+  const hasSnapshotRef = useRef(false);
+
+  useEffect(() => {
+    const isBingo = Boolean(view?.player?.progress?.isBingo);
+    if (!hasSnapshotRef.current) {
+      hasSnapshotRef.current = true;
+      prevIsBingoRef.current = isBingo;
+      return;
+    }
+    if (isBingo && !prevIsBingoRef.current) {
+      const key = Date.now();
+      setBingoFx({ key });
+      if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
+      bingoFxTimerRef.current = window.setTimeout(() => setBingoFx(null), 1800);
+    }
+    prevIsBingoRef.current = isBingo;
+  }, [view?.player?.progress?.isBingo]);
+
+  useEffect(() => () => {
+    if (bingoFxTimerRef.current) window.clearTimeout(bingoFxTimerRef.current);
+  }, []);
+
+  const reachHighlights = useMemo(() => {
+    if (!view?.player?.card) return null;
+    return buildReachHighlights(view.player.card, view.drawnNumbers);
+  }, [view?.player?.card, view?.drawnNumbers]);
+
+  const bingoParticles = useMemo(() => {
+    if (!bingoFx) return [];
+    const count = 26;
+    const list: Array<{ key: string; style: CSSProperties }> = [];
+    for (let i = 0; i < count; i += 1) {
+      const x = Math.random() * 100;
+      const size = 8 + Math.floor(Math.random() * 12);
+      const delay = Math.floor(Math.random() * 240);
+      const dx = Math.floor(Math.random() * 80) - 40;
+      const rot = Math.floor(Math.random() * 360);
+      const dur = 1400 + Math.floor(Math.random() * 700);
+      list.push({
+        key: `${bingoFx.key}:${i}`,
+        style: {
+          "--x": `${x}%`,
+          "--size": `${size}px`,
+          "--delay": `${delay}ms`,
+          "--dx": `${dx}px`,
+          "--rot": `${rot}deg`,
+          "--dur": `${dur}ms`,
+        } as CSSProperties,
+      });
+    }
+    return list;
+  }, [bingoFx]);
 
   async function join() {
     setJoining(true);
@@ -165,7 +261,7 @@ export default function ParticipantPage() {
 
               {view?.player?.card ? (
                 <div className="mt-3">
-                  <BingoCard card={view.player.card} drawnNumbers={view.drawnNumbers} />
+                  <BingoCard card={view.player.card} drawnNumbers={view.drawnNumbers} reachHighlights={reachHighlights ?? undefined} />
                 </div>
               ) : view && view.player === null ? null : (
                 <div className="mt-3 text-sm text-neutral-400">カードを読み込み中...</div>
@@ -195,6 +291,22 @@ export default function ParticipantPage() {
           </div>
         )}
       </div>
+
+      {bingoFx && (
+        <>
+          <div className="pointer-events-none fixed inset-0 z-40">
+            {bingoParticles.map((p) => (
+              <span key={p.key} className="clover-particle" style={p.style} />
+            ))}
+          </div>
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center px-6">
+            <div className="rounded-xl border border-amber-300/70 bg-black/80 px-6 py-4 text-center shadow-[0_0_30px_rgba(234,179,8,0.4)]">
+              <div className="text-[min(18vw,4rem)] font-black tracking-tight text-amber-300 drop-shadow-[0_0_20px_rgba(234,179,8,0.7)]">BINGO!</div>
+              <div className="mt-2 text-xs text-neutral-300">おめでとう！</div>
+            </div>
+          </div>
+        </>
+      )}
     </main>
   );
 }
