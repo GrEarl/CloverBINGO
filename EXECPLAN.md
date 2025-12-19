@@ -73,6 +73,13 @@
 - [x] (2025-12-18 21:18Z) Display の追加調整: 数字の横幅を増やし、スポットライト未使用時は統計を表彰台風に表示し、`PerfectDOSVGA437` フォントを導入した（Web: `tsc`/`vite build` 通過まで確認）。
 - [x] (2025-12-18 21:57Z) Display の JACKPOT 演出を改善: 新規BINGO名は「1人→徐々に追加して縦に伸ばす」表示に変更し、画面に収まらない場合はページ分割して全員を表示する（表示時間も人数に応じて長めに取る）。
 - [ ] (2025-12-18 22:01Z) Display の微調整: LongStreakEnd のSEが鳴り終わるまでは JACKPOT を消さない。数字は「枠の中央に配置」し、サイズを少し上げつつ余白を詰める。
+- [x] (2025-12-18 23:37Z) 抽選確定時の commit ログ整合性（D1 insert 成功後にメモリ更新）を修正し、失敗時の状態を安全に戻せるようにする。
+- [x] (2025-12-18 23:37Z) スポットライト空き枠はすべて統計カードで埋める表示に変更し、Display の空き枠 “EMPTY” 表示を撤去する。
+- [x] (2025-12-18 23:37Z) 参加者上限（200目安）超過時は「警告のみ表示・参加は許可」の挙動に修正する（参加者UIにも警告を表示）。
+- [x] (2025-12-18 23:37Z) `ensureLoaded()` の再試行性を改善し、初回失敗時に以後ずっと 404 になる状態を防ぐ。
+- [x] (2025-12-18 23:37Z) Display の演出タイマー（glitch/strobe）のクリーンアップと、Admin の解放人数カウントに disabled 除外を反映する。
+- [x] (2025-12-18 23:37Z) 要件側の誤記（GO の自動 prepare）をドキュメントに反映し、現行仕様（prepare 必須）に統一する。
+- [x] (2025-12-18 23:37Z) `HowToUse.md` を新規作成し、デプロイ手順・セッション作成・当日運用マニュアルをまとめる。
 
 ## Surprises & Discoveries
 
@@ -184,10 +191,19 @@
 - Decision: LongStreakEnd（`SoundSlotMachineLongStreakEndAnticipation.ogg`）が鳴るケース（新規BINGOが2人以上）では、DisplayのJACKPOT表示は「Admin側でSEが鳴り終わる」まで消さない。表示の最短保持時間は「Adminの名前送りテンポ（1400ms/人） + SE長（約4.11s）」から導出する。
   Rationale: 会場演出の音（最終の溜め）と表示が噛み合わないと“締まり”が悪く、見ている側に違和感が出るため。Display単体ではAdminの音再生状態を直接参照できないので、同梱OGGの実測長に基づく下限時間で揃える。
   Date/Author: 2025-12-18 / codex
+- Decision: GO は prepare 済みのみ可能とし、要件ドキュメント（AGENTS.md）も現行仕様に合わせて修正する。
+  Rationale: 実装と運用の現実（誤作動防止）を優先し、仕様とコードの不一致をなくすため。
+  Date/Author: 2025-12-18 / codex
+- Decision: 参加者上限（目安200人）は警告のみ表示して参加は許可する。
+  Rationale: 現場の状況に応じて参加を止めず、運用判断で続行できるようにするため。
+  Date/Author: 2025-12-18 / codex
+- Decision: 抽選確定は D1 commit が成功してからメモリ状態を更新し、失敗時は pending を prepare 状態へ戻す。
+  Rationale: commit ログとメモリ状態の乖離を防ぎ、再試行可能な状態を保つため。
+  Date/Author: 2025-12-18 / codex
 
 ## Outcomes & Retrospective
 
-- （未記入：フル要件到達時に更新）
+- (2025-12-18) レビュー指摘の重大/中/低（commit整合、空き枠統計差し替え、参加上限警告、再試行性、UI細部）を反映し、運用向け `HowToUse.md` を追加した。未消化の項目（Display微調整）だけ残して進行可能。
 
 ## Context and Orientation
 

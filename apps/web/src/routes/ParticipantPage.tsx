@@ -57,10 +57,13 @@ export default function ParticipantPage() {
         const text = await res.text();
         throw new Error(text || `join failed (${res.status})`);
       }
-      const json = (await res.json()) as { ok: true; playerId: string; mode?: "created" | "updated" };
+      const json = (await res.json()) as { ok: true; playerId: string; mode?: "created" | "updated"; warning?: string };
       setPlayerId(json.playerId);
       setDisplayName(joinName);
-      if (json.mode === "updated") setJoinNotice("この端末は既に参加していたため、表示名を更新しました（カードは引き継ぎです）。");
+      const notices: string[] = [];
+      if (json.mode === "updated") notices.push("この端末は既に参加していたため、表示名を更新しました（カードは引き継ぎです）。");
+      if (json.warning) notices.push(json.warning);
+      if (notices.length) setJoinNotice(notices.join(" / "));
     } catch (err) {
       setJoinError(err instanceof Error ? err.message : "unknown error");
     } finally {

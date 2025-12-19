@@ -128,10 +128,11 @@ function playToEnd(audio: HTMLAudioElement): Promise<void> {
   });
 }
 
-function countPlayersWithNumber(players: Array<{ card?: number[][] }>, n: number): number {
+function countPlayersWithNumber(players: Array<{ card?: number[][]; status?: string }>, n: number): number {
   if (!Number.isFinite(n)) return 0;
   let count = 0;
   for (const p of players) {
+    if (p.status === "disabled") continue;
     const card = p.card;
     if (!card) continue;
     let found = false;

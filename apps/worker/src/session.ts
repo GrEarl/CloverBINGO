@@ -14,6 +14,7 @@ type ParticipantStatus = "active" | "disabled";
 
 const ADMIN_INVITE_COOKIE = "cloverbingo_admin";
 const MOD_INVITE_COOKIE = "cloverbingo_mod";
+const MAX_PLAYERS = 200;
 
 type SpotlightState = {
   version: number;
@@ -51,6 +52,15 @@ type PlayerState = {
   card: BingoCard;
   progress: BingoProgress;
 };
+
+function countActivePlayers(players: Record<string, PlayerState>): number {
+  return Object.values(players).filter((p) => p.status === "active").length;
+}
+
+function buildCapacityWarning(activeCount: number): string | null {
+  if (activeCount <= MAX_PLAYERS) return null;
+  return `参加者が${activeCount}人になりました（目安${MAX_PLAYERS}人を超えています）。混雑時は表示遅延の可能性があります。`;
+}
 
 type WsAttachment = {
   role: Role;
@@ -332,8 +342,18 @@ export class SessionDurableObject {
       })();
     }
 
-    await this.loadPromise;
-    if (!this.session) return textResponse("session not found", { status: 404 });
+    try {
+      await this.loadPromise;
+    } catch (err) {
+      console.error("failed to load session", err);
+      this.loadPromise = null;
+      this.loaded = false;
+      return textResponse("failed to load session", { status: 500 });
+    }
+    if (!this.session) {
+      this.loadPromise = null;
+      return textResponse("session not found", { status: 404 });
+    }
     return null;
   }
 
@@ -607,9 +627,10 @@ export class SessionDurableObject {
       await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
       const cached = this.players[existing.id];
       if (cached) cached.displayName = displayName;
+      const warning = buildCapacityWarning(countActivePlayers(this.players));
       this.touch();
       this.broadcastSnapshots();
-      return jsonResponse({ ok: true, playerId: existing.id, mode: "updated" });
+      return jsonResponse({ ok: true, playerId: existing.id, mode: "updated", warning });
     }
 
     const playerId = crypto.randomUUID();
@@ -642,9 +663,10 @@ export class SessionDurableObject {
         await db.update(participants).set({ displayName }).where(eq(participants.id, existing.id));
         const cached = this.players[existing.id];
         if (cached) cached.displayName = displayName;
+        const warning = buildCapacityWarning(countActivePlayers(this.players));
         this.touch();
         this.broadcastSnapshots();
-        return jsonResponse({ ok: true, playerId: existing.id, mode: "updated" });
+        return jsonResponse({ ok: true, playerId: existing.id, mode: "updated", warning });
       }
       return textResponse("failed to create participant", { status: 500 });
     }
@@ -661,6 +683,7 @@ export class SessionDurableObject {
       progress,
     };
 
+    const warning = buildCapacityWarning(countActivePlayers(this.players));
     this.refreshPendingDrawImpact();
     this.touch();
     this.broadcastSnapshots();
@@ -671,6 +694,7 @@ export class SessionDurableObject {
       card,
       progress,
       mode: "created",
+      warning,
     });
   }
 
@@ -805,7 +829,7 @@ export class SessionDurableObject {
     const rawPrefix = (body as { prefix?: unknown }).prefix;
     const prefix = typeof rawPrefix === "string" && rawPrefix.trim() ? rawPrefix.trim().slice(0, 12) : "DEV";
 
-    const maxPlayers = 200;
+    const maxPlayers = MAX_PLAYERS;
     const existing = Object.keys(this.players).length;
     const capacity = Math.max(0, maxPlayers - existing);
     const addCount = Math.min(requested, capacity);
@@ -922,14 +946,16 @@ export class SessionDurableObject {
     if (!this.session || !this.pendingDraw) return null;
 
     const number = this.pendingDraw.number;
-    const beforeBingo = new Set(Object.values(this.players).filter((p) => p.status === "active" && p.progress.isBingo).map((p) => p.id));
+    const activePlayers = Object.values(this.players).filter((p) => p.status === "active");
+    const beforeBingo = new Set(activePlayers.filter((p) => p.progress.isBingo).map((p) => p.id));
 
-    this.drawnNumbers.push(number);
+    const nextDrawnNumbers = this.drawnNumbers.concat([number]);
+    const nextProgressById: Record<string, BingoProgress> = {};
     for (const player of Object.values(this.players)) {
-      player.progress = evaluateCard(player.card, this.drawnNumbers);
+      nextProgressById[player.id] = evaluateCard(player.card, nextDrawnNumbers);
     }
 
-    const afterBingo = new Set(Object.values(this.players).filter((p) => p.status === "active" && p.progress.isBingo).map((p) => p.id));
+    const afterBingo = new Set(activePlayers.filter((p) => nextProgressById[p.id]?.isBingo).map((p) => p.id));
     let newBingoCount = 0;
     const newBingoIds: string[] = [];
     for (const id of afterBingo) {
@@ -939,20 +965,40 @@ export class SessionDurableObject {
     }
     const newBingoNames = newBingoIds.map((id) => this.players[id]?.displayName ?? id);
 
-    const seq = this.drawnNumbers.length;
-    const stats = computeSessionStats(Object.values(this.players).filter((p) => p.status === "active").map((p) => p.progress));
+    const seq = nextDrawnNumbers.length;
+    const stats = computeSessionStats(activePlayers.map((p) => nextProgressById[p.id]));
     const committedAt = isoNow();
 
     const db = getDb(this.env);
-    await db.insert(drawCommits).values({
-      sessionId: this.session.id,
-      seq,
-      number,
-      committedAt,
-      reachCount: stats.reachPlayers,
-      bingoCount: stats.bingoPlayers,
-      newBingoCount,
-    });
+    try {
+      await db.insert(drawCommits).values({
+        sessionId: this.session.id,
+        seq,
+        number,
+        committedAt,
+        reachCount: stats.reachPlayers,
+        bingoCount: stats.bingoPlayers,
+        newBingoCount,
+      });
+    } catch (err) {
+      console.error("commit failed", err);
+      if (this.pendingDraw) {
+        this.pendingDraw.state = "prepared";
+        this.pendingDraw.reel.ten = "idle";
+        this.pendingDraw.reel.one = "idle";
+        this.pendingDraw.stoppedDigits.ten = null;
+        this.pendingDraw.stoppedDigits.one = null;
+      }
+      this.touch();
+      this.broadcastSnapshots();
+      return textResponse("commit failed", { status: 500 });
+    }
+
+    this.drawnNumbers = nextDrawnNumbers;
+    for (const player of Object.values(this.players)) {
+      const nextProgress = nextProgressById[player.id];
+      if (nextProgress) player.progress = nextProgress;
+    }
 
     this.pendingDraw = null;
     this.touch();

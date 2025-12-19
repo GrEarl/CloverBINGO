@@ -171,6 +171,8 @@ export default function DisplayPage() {
   const shakeTimerRef = useRef<number | null>(null);
   const [glitch, setGlitch] = useState(false);
   const [strobe, setStrobe] = useState(false);
+  const glitchTimerRef = useRef<number | null>(null);
+  const strobeTimerRef = useRef<number | null>(null);
   
   const [popDigit, setPopDigit] = useState(false);
   const popTimerRef = useRef<number | null>(null);
@@ -370,9 +372,11 @@ export default function DisplayPage() {
         triggerShake("violent");
         if (fxActive && !safeMode) {
           setGlitch(true);
-          setTimeout(() => setGlitch(false), 1200);
+          if (glitchTimerRef.current) window.clearTimeout(glitchTimerRef.current);
+          glitchTimerRef.current = window.setTimeout(() => setGlitch(false), 1200);
           setStrobe(true);
-          setTimeout(() => setStrobe(false), 2000);
+          if (strobeTimerRef.current) window.clearTimeout(strobeTimerRef.current);
+          strobeTimerRef.current = window.setTimeout(() => setStrobe(false), 2000);
         }
 
         const pageHoldMs = safeMode ? 1800 : 900;
@@ -565,6 +569,8 @@ export default function DisplayPage() {
       if (bingoAnnounceStepTimerRef.current) window.clearTimeout(bingoAnnounceStepTimerRef.current);
       if (bingoAnnounceHideTimerRef.current) window.clearTimeout(bingoAnnounceHideTimerRef.current);
       if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current);
+      if (glitchTimerRef.current) window.clearTimeout(glitchTimerRef.current);
+      if (strobeTimerRef.current) window.clearTimeout(strobeTimerRef.current);
     };
   }, []);
 
@@ -638,7 +644,6 @@ export default function DisplayPage() {
     }
     sidePlayers.push(playerById.get(id) ?? spotlightCacheRef.current.get(id) ?? null);
   }
-  const showStatsFallback = sidePlayers.every((p) => p === null);
   const stats = view?.stats ?? null;
   const minMissing = stats?.minMissingHistogram ?? null;
   const statBingo = minMissing?.["0"] ?? stats?.bingoPlayers ?? 0;
@@ -646,127 +651,109 @@ export default function DisplayPage() {
   const statTwoAway = minMissing?.["2"] ?? 0;
   const statThreePlus = minMissing?.["3plus"] ?? 0;
 
-  const sideCards: ReactNode[] = showStatsFallback
-    ? [
-        <div
-          key="stats:fallback"
-          className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_12px_rgba(0,0,0,0.55)]"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-xs text-pit-text-muted tracking-[0.22em]">STATS</div>
-            <div className="text-xs text-pit-text-dim">
-              DRAW <span className="font-mono text-pit-primary">{view?.drawCount ?? 0}</span>/75
-            </div>
-          </div>
+  const renderStatsCard = (key: string) => (
+    <div
+      key={key}
+      className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_12px_rgba(0,0,0,0.55)]"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-pit-text-muted tracking-[0.22em]">STATS</div>
+        <div className="text-xs text-pit-text-dim">
+          DRAW <span className="font-mono text-pit-primary">{view?.drawCount ?? 0}</span>/75
+        </div>
+      </div>
 
-          {/* Podium */}
-          <div className="mt-4 flex items-end justify-center gap-3">
-            <div className="w-[30%]">
-              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">1 AWAY</div>
-              <div className="flex h-[max(10rem,20vh)] items-end justify-center border border-pit-border bg-black/40 px-2 pb-3">
-                <div className="text-center">
-                  <div className="text-[min(6.2vw,5.2rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_18px_rgba(234,179,8,0.55)]">
-                    {statOneAway}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="w-[34%]">
-              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">BINGO</div>
-              <div className="flex h-[max(12rem,24vh)] items-end justify-center border border-pit-primary/60 bg-black/50 px-2 pb-3 shadow-[0_0_22px_rgba(234,179,8,0.2)]">
-                <div className="text-center">
-                  <div className="text-[min(6.8vw,5.8rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.75)]">
-                    {statBingo}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="w-[30%]">
-              <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">2 AWAY</div>
-              <div className="flex h-[max(9rem,18vh)] items-end justify-center border border-pit-border bg-black/35 px-2 pb-3">
-                <div className="text-center">
-                  <div className="text-[min(5.5vw,4.6rem)] font-black tabular-nums text-pit-text-main drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]">
-                    {statTwoAway}
-                  </div>
-                </div>
+      {/* Podium */}
+      <div className="mt-4 flex items-end justify-center gap-3">
+        <div className="w-[30%]">
+          <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">1 AWAY</div>
+          <div className="flex h-[max(10rem,20vh)] items-end justify-center border border-pit-border bg-black/40 px-2 pb-3">
+            <div className="text-center">
+              <div className="text-[min(6.2vw,5.2rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_18px_rgba(234,179,8,0.55)]">
+                {statOneAway}
               </div>
             </div>
           </div>
-
-          <div className="mt-4 flex items-center justify-between gap-3 border-t border-pit-border/60 pt-3 text-sm text-pit-text-dim">
-            <div className="tracking-[0.18em]">3+ AWAY</div>
-            <div className="font-mono text-[min(4.2vw,3.2rem)] font-black tabular-nums text-pit-text-main">{statThreePlus}</div>
+        </div>
+        <div className="w-[34%]">
+          <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">BINGO</div>
+          <div className="flex h-[max(12rem,24vh)] items-end justify-center border border-pit-primary/60 bg-black/50 px-2 pb-3 shadow-[0_0_22px_rgba(234,179,8,0.2)]">
+            <div className="text-center">
+              <div className="text-[min(6.8vw,5.8rem)] font-black tabular-nums text-pit-primary drop-shadow-[0_0_24px_rgba(234,179,8,0.75)]">
+                {statBingo}
+              </div>
+            </div>
           </div>
-        </div>,
-      ]
-	    : sidePlayers.map((p, idx) => {
-	        if (!p) {
-	          return (
-	            <div
-	              key={`spotlight-empty:${idx}`}
-	              className="rounded-none border border-pit-border bg-pit-surface/60 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.4)]"
-	            >
-	              <div className="text-xs text-pit-text-muted tracking-[0.18em]">SPOTLIGHT</div>
-	              <div className="mt-3 text-2xl font-black tracking-widest text-pit-text-dim">EMPTY</div>
-	            </div>
-	          );
-	        }
+        </div>
+        <div className="w-[30%]">
+          <div className="mb-1 text-center text-[0.65rem] text-pit-text-dim tracking-[0.18em]">2 AWAY</div>
+          <div className="flex h-[max(9rem,18vh)] items-end justify-center border border-pit-border bg-black/35 px-2 pb-3">
+            <div className="text-center">
+              <div className="text-[min(5.5vw,4.6rem)] font-black tabular-nums text-pit-text-main drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]">
+                {statTwoAway}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-	        return (
-	          <div key={`spotlight:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
-	            <div className="flex items-center justify-between gap-2">
-	              <div className="truncate text-lg font-bold text-pit-text-main text-glow">{p.displayName}</div>
-	              {p.progress.isBingo && (
-	                <Badge variant="success" className="shrink-0">
-	                  BINGO
-	                </Badge>
-	              )}
-	            </div>
-	            <div className="mt-3 flex items-start gap-4">
-	              {p.card ? (
-	                <BingoCard
-	                  variant="compact"
-	                  card={p.card}
-	                  drawnNumbers={drawnNumbers}
-	                  showHeaders={false}
-	                  className="w-full max-w-[min(24vh,260px)] shrink-0"
-	                />
-	              ) : (
-	                <div className="w-full max-w-[min(24vh,260px)] border border-pit-border bg-black/40 p-4 text-xs text-pit-text-dim">
-	                  NO CARD DATA
-	                </div>
-	              )}
-	
-	              <div className="min-w-0 flex-1">
-	                <div className="grid grid-cols-3 gap-3">
-	                  <div className="border border-pit-border bg-black/35 px-3 py-2">
-	                    <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">NEED</div>
-	                    <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">
-	                      {p.progress.minMissingToLine}
-	                    </div>
-	                  </div>
-	                  <div className="border border-pit-border bg-black/35 px-3 py-2">
-	                    <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">REACH</div>
-	                    <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">
-	                      {p.progress.reachLines}
-	                    </div>
-	                  </div>
-	                  <div className="border border-pit-border bg-black/35 px-3 py-2">
-	                    <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">LINES</div>
-	                    <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">
-	                      {p.progress.bingoLines}
-	                    </div>
-	                  </div>
-	                </div>
-	
-	                <div className="mt-3 text-xs text-pit-text-dim">
-	                  {p.progress.isBingo ? "STATUS: BINGO" : "STATUS: ACTIVE"}
-	                </div>
-	              </div>
-	            </div>
-	          </div>
-	        );
-	      });
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-pit-border/60 pt-3 text-sm text-pit-text-dim">
+        <div className="tracking-[0.18em]">3+ AWAY</div>
+        <div className="font-mono text-[min(4.2vw,3.2rem)] font-black tabular-nums text-pit-text-main">{statThreePlus}</div>
+      </div>
+    </div>
+  );
+
+  const sideCards: ReactNode[] = sidePlayers.map((p, idx) => {
+    if (!p) return renderStatsCard(`stats:${idx}`);
+
+    return (
+      <div key={`spotlight:${idx}`} className="rounded-none border border-pit-border bg-pit-surface/80 p-4 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="truncate text-lg font-bold text-pit-text-main text-glow">{p.displayName}</div>
+          {p.progress.isBingo && (
+            <Badge variant="success" className="shrink-0">
+              BINGO
+            </Badge>
+          )}
+        </div>
+        <div className="mt-3 flex items-start gap-4">
+          {p.card ? (
+            <BingoCard
+              variant="compact"
+              card={p.card}
+              drawnNumbers={drawnNumbers}
+              showHeaders={false}
+              className="w-full max-w-[min(24vh,260px)] shrink-0"
+            />
+          ) : (
+            <div className="w-full max-w-[min(24vh,260px)] border border-pit-border bg-black/40 p-4 text-xs text-pit-text-dim">
+              NO CARD DATA
+            </div>
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="border border-pit-border bg-black/35 px-3 py-2">
+                <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">NEED</div>
+                <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">{p.progress.minMissingToLine}</div>
+              </div>
+              <div className="border border-pit-border bg-black/35 px-3 py-2">
+                <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">REACH</div>
+                <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">{p.progress.reachLines}</div>
+              </div>
+              <div className="border border-pit-border bg-black/35 px-3 py-2">
+                <div className="text-[0.65rem] font-semibold tracking-[0.28em] text-pit-text-dim">LINES</div>
+                <div className="mt-1 text-[min(6vw,4rem)] font-black tabular-nums text-pit-text-main">{p.progress.bingoLines}</div>
+              </div>
+            </div>
+
+            <div className="mt-3 text-xs text-pit-text-dim">{p.progress.isBingo ? "STATUS: BINGO" : "STATUS: ACTIVE"}</div>
+          </div>
+        </div>
+      </div>
+    );
+  });
 
   const shakeClass = shake === "small" ? "shake-small" : shake === "medium" ? "shake-medium" : shake === "violent" ? "shake-violent" : "";
   const glitchClass = glitch ? "glitch-active" : "";

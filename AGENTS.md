@@ -258,7 +258,7 @@ type BingoCard = {
 * `W/A/S/D`（go）
 
   * `prepared` があればそれを採用して演出開始
-  * `idle` なら内部で `prepare` して即 `go`（運用事故を減らす）
+  * `idle` の場合は `prepare` が必要（未prepare時の GO は拒否し、Admin に案内する）
   * DOは Displayへ「回転開始」→「停止（確定数字）」を送る
   * 停止タイミングで commit を確定し、D1へ `draw_commits` を追記
   * commit後、全クライアントへ状態更新を配信
